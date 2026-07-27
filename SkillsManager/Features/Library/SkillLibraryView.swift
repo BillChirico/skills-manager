@@ -9,6 +9,10 @@ struct SkillLibraryView: View {
         case relocate(SkillSource.ID)
     }
 
+    /// Wide enough for a typical skill name, narrow enough that the toolbar actions
+    /// still read as the toolbar's primary content.
+    private static let searchFieldWidth: CGFloat = 220
+
     @Bindable var model: SkillLibraryModel
     @Bindable var catalogModel: SkillCatalogModel
     @State private var isChoosingDirectory = false
@@ -31,44 +35,26 @@ struct SkillLibraryView: View {
         } detail: {
             SkillDetail(model: model)
         }
-        .navigationTitle("Skills Manager")
+        .navigationTitle(model.scopeTitle)
+        .navigationSubtitle(model.scopeSubtitle)
         .searchable(
             text: $model.searchText,
             placement: .toolbar,
             prompt: model.searchPrompt
         )
+        .toolbarSearchFieldWidth(Self.searchFieldWidth)
+        // Two groups, read left to right: bring skills in, then find them. The search
+        // field is appended by `searchable` and lands after the sort control.
         .toolbar {
-            ToolbarItem {
-                Button("Discover Skills", systemImage: "globe") {
-                    isShowingCatalog = true
-                }
-                .help("Search and install skills from skills.sh")
-            }
-
-            ToolbarItem {
-                Menu {
-                    Picker("Sort Skills", selection: $model.sortOrder) {
-                        ForEach(SkillSortOrder.allCases) { order in
-                            Text(order.displayName)
-                                .tag(order)
-                        }
-                    }
-                } label: {
-                    Label("Sort by \(model.sortOrder.displayName)", systemImage: "arrow.up.arrow.down")
-                }
-                .help("Sort skills by name, date added, or agent")
-            }
-
-            ToolbarItem {
-                SettingsLink {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .help("Open Skills Manager settings")
-            }
-
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                discoverButton
+                Color.clear
+                    .frame(width: 12)
+                    .accessibilityHidden(true)
                 addDirectoryButton
             }
+
+            libraryViewToolbarContent
         }
         .fileImporter(
             isPresented: $isChoosingDirectory,
@@ -96,6 +82,41 @@ struct SkillLibraryView: View {
         }
     }
 
+    private var discoverButton: some View {
+        Button("Discover", systemImage: "globe") {
+            isShowingCatalog = true
+        }
+        .labelStyle(.titleAndIcon)
+        .help("Search and install skills from skills.sh")
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            Picker("Sort Skills", selection: $model.sortOrder) {
+                ForEach(SkillSortOrder.allCases) { order in
+                    Text(order.displayName)
+                        .tag(order)
+                }
+            }
+        } label: {
+            Label("Sort by \(model.sortOrder.displayName)", systemImage: "arrow.up.arrow.down")
+        }
+        .help("Sort skills by name, date added, or agent")
+    }
+
+    /// Splits the controls that change how the library is displayed away from the
+    /// actions that add to it, so the two groups read as separate Liquid Glass clusters.
+    @ToolbarContentBuilder
+    private var libraryViewToolbarContent: some ToolbarContent {
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+        }
+
+        ToolbarItem(placement: .primaryAction) {
+            sortMenu
+        }
+    }
+
     @ViewBuilder
     private var addDirectoryButton: some View {
         if #available(macOS 26.0, *) {
@@ -116,6 +137,10 @@ struct SkillLibraryView: View {
                 )
             }
         }
+        // A menu only picks up a button style once it renders as a button. macOS 26
+        // still overrides the style with its uniform toolbar glass; this is what keeps
+        // the prominent treatment working on macOS 15 through 25.
+        .menuStyle(.button)
         .labelStyle(.titleAndIcon)
         .help("Add a directory that contains an agent’s skills")
     }

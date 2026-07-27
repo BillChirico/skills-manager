@@ -120,9 +120,44 @@ final class SkillLibraryModel {
         }
     }
 
+    /// The window title, which names what the content column is currently showing.
+    var scopeTitle: String {
+        switch sidebarSelection {
+        case .allSkills:
+            "All Skills"
+        case .updatesAvailable:
+            "Updates Available"
+        case .disabled:
+            "Disabled"
+        case .recentlyAdded:
+            "Recently Added"
+        case .source(let sourceID):
+            source(for: sourceID)?.displayName ?? "Skills Manager"
+        }
+    }
+
+    /// The window subtitle, which counts what is in view and narrows to matches while searching.
+    var scopeSubtitle: String {
+        let visibleCount = visibleSkills.count
+
+        guard isSearching else {
+            return visibleCount == 0 ? "No skills" : "\(visibleCount) \(skillNoun(visibleCount))"
+        }
+
+        let scopeCount = filteredSkills(in: sidebarSelection, query: "").count
+        return "\(visibleCount) of \(scopeCount) \(skillNoun(scopeCount))"
+    }
+
+    private var isSearching: Bool {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+
+    private func skillNoun(_ count: Int) -> String {
+        count == 1 ? "skill" : "skills"
+    }
+
     var canSearchAllSkills: Bool {
-        let hasQuery = searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        return hasQuery
+        isSearching
             && sidebarSelection != .allSkills
             && visibleSkills.isEmpty
             && filteredSkills(in: .allSkills, query: searchText).isEmpty == false
