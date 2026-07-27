@@ -79,7 +79,9 @@ installed skill.
 The deployment target is macOS 15. Liquid Glass is used through availability
 checks on macOS 26 and newer; earlier systems receive a semantic material
 fallback. New visual treatments must remain legible with increased contrast,
-reduced transparency, and reduced motion.
+reduced transparency, and reduced motion. The app does not define a global
+accent-color asset or root tint, so native SwiftUI and AppKit controls inherit
+the user's current macOS accent color.
 
 The library window titles itself after the selected scope and subtitles itself
 with the count in view, so the title bar reports state instead of repeating the
