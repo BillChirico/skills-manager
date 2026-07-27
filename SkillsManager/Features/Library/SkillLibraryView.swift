@@ -4,6 +4,9 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct SkillLibraryView: View {
+    /// Wide enough for a typical skill name, narrow enough that the toolbar actions
+    /// still read as the toolbar's primary content.
+    private static let searchFieldWidth: CGFloat = 220
     @Bindable var model: SkillLibraryModel
     @Bindable var catalogModel: SkillCatalogModel
     @State private var isChoosingDirectory = false
@@ -20,37 +23,26 @@ struct SkillLibraryView: View {
         } detail: {
             SkillDetail(model: model)
         }
-        .navigationTitle("Skills Manager")
+        .navigationTitle(model.scopeTitle)
+        .navigationSubtitle(model.scopeSubtitle)
         .searchable(
             text: $model.searchText,
             placement: .toolbar,
             prompt: model.searchPrompt
         )
+        .toolbarSearchFieldWidth(Self.searchFieldWidth)
+        // Two groups, read left to right: discover or configure skills, then find
+        // them. The search field is appended by `searchable` after the sort control.
         .toolbar {
-            ToolbarItem {
-                Button("Discover Skills", systemImage: "globe") {
-                    isShowingCatalog = true
-                }
-                .help("Search and install skills from skills.sh")
-            }
-
-            ToolbarItem {
-                Menu {
-                    Picker("Sort Skills", selection: $model.sortOrder) {
-                        ForEach(SkillSortOrder.allCases) { order in
-                            Text(order.displayName)
-                                .tag(order)
-                        }
-                    }
-                } label: {
-                    Label("Sort by \(model.sortOrder.displayName)", systemImage: "arrow.up.arrow.down")
-                }
-                .help("Sort skills by name, date added, or agent")
-            }
-
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                discoverButton
+                Color.clear
+                    .frame(width: 12)
+                    .accessibilityHidden(true)
                 settingsButton
             }
+
+            libraryViewToolbarContent
         }
         .fileImporter(
             isPresented: $isChoosingDirectory,
@@ -77,6 +69,41 @@ struct SkillLibraryView: View {
         }
     }
 
+    private var discoverButton: some View {
+        Button("Discover", systemImage: "globe") {
+            isShowingCatalog = true
+        }
+        .labelStyle(.titleAndIcon)
+        .help("Search and install skills from skills.sh")
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            Picker("Sort Skills", selection: $model.sortOrder) {
+                ForEach(SkillSortOrder.allCases) { order in
+                    Text(order.displayName)
+                        .tag(order)
+                }
+            }
+        } label: {
+            Label("Sort by \(model.sortOrder.displayName)", systemImage: "arrow.up.arrow.down")
+        }
+        .help("Sort skills by name, date added, or agent")
+    }
+
+    /// Splits display controls from discovery and configuration actions so the
+    /// two groups read as separate Liquid Glass clusters.
+    @ToolbarContentBuilder
+    private var libraryViewToolbarContent: some ToolbarContent {
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+        }
+
+        ToolbarItem(placement: .primaryAction) {
+            sortMenu
+        }
+    }
+
     @ViewBuilder
     private var settingsButton: some View {
         if #available(macOS 26.0, *) {
@@ -92,6 +119,7 @@ struct SkillLibraryView: View {
         SettingsLink {
             Label("Settings", systemImage: "gearshape")
         }
+        .labelStyle(.titleAndIcon)
         .help("Manage skill folders and app settings")
     }
 

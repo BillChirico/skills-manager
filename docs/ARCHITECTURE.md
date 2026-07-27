@@ -79,6 +79,17 @@ checks on macOS 26 and newer; earlier systems receive a semantic material
 fallback. New visual treatments must remain legible with increased contrast,
 reduced transparency, and reduced motion.
 
+The library window titles itself after the selected scope and subtitles itself
+with the count in view, so the title bar reports state instead of repeating the
+app name. Toolbar actions form two groups separated by a `ToolbarSpacer`:
+discovery and the prominent Settings action, then the sort and search controls
+that change how the library is displayed. Settings is also available through
+the app menu and `Command-,`. `SkillsCore` still owns no AppKit, but
+`Shared/VisualStyle/ToolbarSearchFieldWidth.swift` bridges to
+`NSSearchToolbarItem` because SwiftUI exposes no way to stop a toolbar search
+field from growing wider than every action beside it. Prefer a native SwiftUI
+API and add a bridge like this only when none exists.
+
 The app sandbox permits outbound network access, user-selected read/write
 access, and app-scoped bookmarks. Directory grants are stored as
 security-scoped bookmarks, resolved on launch, and held only while their source
