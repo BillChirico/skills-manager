@@ -45,8 +45,11 @@ rows have no decorative status checkmark. Exceptions use icon-and-text labels:
 
 Each row owns a labeled native Toggle for the enabled state. An unavailable row
 also owns a `Reconnect…` button that opens the existing security-scoped folder
-picker and calls the existing relocation path. Row text and child controls
-remain separate accessibility elements so VoiceOver can operate each control.
+picker and calls the existing relocation path. The Toggle remains a distinct
+accessibility control. Because macOS merges a secondary button into a selectable
+list row, that Toggle also exposes the same source-specific reconnect operation
+as a named accessibility action, keeping the action directly operable by
+VoiceOver.
 
 ### Settings layout
 
@@ -72,8 +75,9 @@ source record, never the user's files.
 - Do not use blanket row opacity to communicate state.
 - Status is never icon-only; visible text and a meaningful accessibility label
   are required.
-- Toggle and reconnect controls have source-specific labels and remain
-  independently focusable.
+- Toggle and reconnect controls have source-specific labels. The Toggle remains
+  independently focusable and an unavailable row mirrors Reconnect as a named
+  accessibility action on that control.
 - Use semantic system foregrounds, backgrounds, and separator colors in both
   light and dark appearances.
 - Visual verification must capture the Settings window while it is the key

@@ -50,5 +50,6 @@ struct SkillsManagerApp: App {
         Settings {
             SettingsView(model: libraryModel)
         }
+        .windowResizability(.contentMinSize)
     }
 }

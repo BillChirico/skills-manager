@@ -96,7 +96,9 @@ Settings uses a grouped native `Form` and a resizable minimum/ideal frame. Its
 static folder list uses semantic control and separator colors; Liquid Glass is
 reserved for interactive controls on macOS 26. Healthy rows omit decorative
 status icons. Paused, scanning, and missing states use readable text, and row
-toggles and reconnect buttons remain distinct accessibility elements.
+toggles remain distinct accessibility elements. Since macOS folds a secondary
+button into a selectable list row, unavailable rows also expose Reconnect as a
+source-specific named accessibility action on the row Toggle.
 
 The app sandbox permits outbound network access, user-selected read/write
 access, and app-scoped bookmarks. Directory grants are stored as

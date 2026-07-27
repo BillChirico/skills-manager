@@ -280,6 +280,7 @@ struct SettingsView: View {
                 Button("Reconnect…", systemImage: "folder.badge.questionmark") {
                     beginReconnectingFolder(source)
                 }
+                .buttonStyle(.borderless)
                 .controlSize(.small)
                 .accessibilityLabel(presentation.reconnectAccessibilityLabel)
                 .help("Choose the current location of \(source.displayName)")
@@ -299,6 +300,13 @@ struct SettingsView: View {
             .accessibilityLabel(presentation.toggleAccessibilityLabel)
             .accessibilityValue(source.isEnabled ? "On" : "Off")
             .accessibilityHint(presentation.stateAccessibilityLabel)
+            .accessibilityActions {
+                if presentation.showsReconnectAction {
+                    Button(presentation.reconnectAccessibilityLabel) {
+                        beginReconnectingFolder(source)
+                    }
+                }
+            }
             .help(
                 source.isEnabled
                     ? "Pause scanning \(source.displayName)"
