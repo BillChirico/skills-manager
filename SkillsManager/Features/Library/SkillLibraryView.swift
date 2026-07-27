@@ -160,8 +160,7 @@ struct SkillLibraryView: View {
 
 struct AgentDirectoryMenuContent: View {
     let chooseDirectory: (SkillAgent, URL?) -> Void
-    private let homeDirectory = FileManager.default.homeDirectoryForCurrentUser
-
+    var homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     var body: some View {
         Section("Suggested Locations") {
             ForEach(agentsWithDefaultDirectory) { agent in
