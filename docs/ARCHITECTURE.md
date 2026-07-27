@@ -1,7 +1,7 @@
 # Architecture
 
-Skills Manager starts as a small modular macOS application. The initial
-boundary is intentionally simple:
+Skills Manager is a small modular macOS application with an intentionally
+simple boundary:
 
 ```text
 SwiftUI app (SkillsManager)
@@ -10,7 +10,7 @@ SwiftUI app (SkillsManager)
 domain package (SkillsCore)
         │
         ▼
-future injected filesystem, persistence, and registry adapters
+injected filesystem and persistence adapters
 ```
 
 `SkillsCore` must not import SwiftUI or AppKit. This keeps domain behavior
@@ -25,22 +25,25 @@ depend on `SkillsCore`; they should not perform direct filesystem or network
 work.
 
 UI state is isolated to the main actor. The initial library model coordinates
-selection, filtering, and user-added directory references. Durable bookmark
-storage and skill discovery are explicit follow-up seams rather than hidden
-global dependencies.
+source restoration, selection, scoped search, discovery, and mutations. Native
+bookmark creation and security-scoped access live in the app layer because
+those APIs are macOS-specific. The model receives persistence and discovery
+dependencies through protocols rather than reaching for global state.
 
 ## Domain layer
 
 `Packages/SkillsCore` owns:
 
 - `SkillSource`, a user-configured skill directory;
-- `AgentSkill`, a discovered skill and its management state; and
-- `SkillSearch`, deterministic filtering and ordering.
+- `AgentSkill`, a discovered skill with stable source-relative identity;
+- `SkillDiscovering`, with a local `SKILL.md` scanner;
+- `SkillSourceStore`, with an atomic JSON implementation;
+- `SkillLibraryFilter`, which applies smart-group and source scopes; and
+- `SkillSearch`, which provides deterministic relevance ranking.
 
-Future filesystem scanners, manifest parsers, registries, and install/update
-operations should enter the package behind small injected protocols. Tests must
-use in-memory fakes or temporary directories rather than a developer's real
-skill folders.
+Future registries and install/update operations should enter the package behind
+small injected protocols. Tests use in-memory fakes or temporary directories
+rather than a developer's real skill folders.
 
 ## Platform and visual policy
 
@@ -50,9 +53,9 @@ fallback. New visual treatments must remain legible with increased contrast,
 reduced transparency, and reduced motion.
 
 The app sandbox permits user-selected read/write access and app-scoped
-bookmarks. A directory picker grant is not automatically durable: persistence
-work must store and resolve security-scoped bookmarks before accessing a folder
-in a later launch.
+bookmarks. Directory grants are stored as security-scoped bookmarks, resolved
+on launch, and held only while their source remains configured. Failed
+resolution is surfaced as an unavailable source instead of an empty library.
 
 ## Project generation
 
@@ -63,8 +66,8 @@ with `make generate`.
 
 ## Planned extension points
 
-1. Persist user-selected sources as security-scoped bookmarks.
-2. Discover and validate `SKILL.md` manifests off the main actor.
-3. Add install, update, remove, and conflict-resolution operations.
-4. Add remote registry clients behind injected protocols.
-5. Add UI automation with XCTest after core user flows stabilize.
+1. Define the authoritative install, update, remove, and conflict-resolution
+   semantics behind an injected mutation protocol.
+2. Add remote registry clients behind injected protocols once the update source
+   is defined.
+3. Add UI automation with XCTest after the mutation workflows stabilize.

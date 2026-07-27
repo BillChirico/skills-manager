@@ -5,7 +5,6 @@ import UniformTypeIdentifiers
 struct SkillLibraryView: View {
     @Bindable var model: SkillLibraryModel
     @State private var isChoosingDirectory = false
-    @State private var importFailure: ImportFailure?
 
     var body: some View {
         NavigationSplitView {
@@ -15,13 +14,13 @@ struct SkillLibraryView: View {
                 isChoosingDirectory = true
             }
         } detail: {
-            SkillDetail(skill: model.selectedSkill)
+            SkillDetail(model: model)
         }
         .navigationTitle("Skills Manager")
         .searchable(
             text: $model.searchText,
             placement: .toolbar,
-            prompt: "Search skills"
+            prompt: model.searchPrompt
         )
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -34,46 +33,48 @@ struct SkillLibraryView: View {
             allowsMultipleSelection: false,
             onCompletion: handleDirectoryImport
         )
-        .alert(item: $importFailure) { failure in
+        .alert(item: $model.presentedError) { error in
             Alert(
-                title: Text("Unable to Add Directory"),
-                message: Text(failure.message),
+                title: Text(error.title),
+                message: Text(error.message),
                 dismissButton: .default(Text("OK"))
             )
+        }
+        .task {
+            await model.restoreSources()
         }
     }
 
     @ViewBuilder
     private var addDirectoryButton: some View {
         if #available(macOS 26.0, *) {
-            Button("Add Skill Directory", systemImage: "folder.badge.plus") {
+            Button("Add Directory", systemImage: "plus") {
                 isChoosingDirectory = true
             }
             .buttonStyle(.glassProminent)
+            .labelStyle(.titleAndIcon)
             .help("Add a directory that contains agent skills")
         } else {
-            Button("Add Skill Directory", systemImage: "folder.badge.plus") {
+            Button("Add Directory", systemImage: "plus") {
                 isChoosingDirectory = true
             }
             .buttonStyle(.borderedProminent)
+            .labelStyle(.titleAndIcon)
             .help("Add a directory that contains agent skills")
         }
     }
 
     private func handleDirectoryImport(_ result: Result<[URL], any Error>) {
-        do {
-            guard let directoryURL = try result.get().first else {
-                return
-            }
+        Task { @MainActor in
+            do {
+                guard let directoryURL = try result.get().first else {
+                    return
+                }
 
-            model.addSource(at: directoryURL)
-        } catch {
-            importFailure = ImportFailure(message: error.localizedDescription)
+                try await model.addSource(at: directoryURL)
+            } catch {
+                model.report(error, title: "Unable to Add Directory")
+            }
         }
     }
-}
-
-private struct ImportFailure: Identifiable {
-    let id = UUID()
-    let message: String
 }

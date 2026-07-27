@@ -1,88 +1,300 @@
+import AppKit
 import SkillsCore
 import SwiftUI
 
 struct SkillList: View {
     @Bindable var model: SkillLibraryModel
     let addDirectory: () -> Void
+    @State private var skillIDsPendingRemoval: Set<AgentSkill.ID> = []
 
     var body: some View {
         Group {
             if model.visibleSkills.isEmpty {
-                ContentUnavailableView {
-                    Label(emptyTitle, systemImage: emptySystemImage)
-                } description: {
-                    Text(emptyDescription)
-                } actions: {
-                    if model.sources.isEmpty {
-                        Button("Add Skill Directory", action: addDirectory)
+                emptyState
+            } else {
+                List(model.visibleSkills, selection: $model.selectedSkillIDs) { skill in
+                    SkillRow(
+                        skill: skill,
+                        isSelected: model.selectedSkillIDs.contains(skill.id)
+                    )
+                    .tag(skill.id)
+                    .contextMenu {
+                        skillContextMenu(skill)
                     }
                 }
-            } else {
-                List(model.visibleSkills, selection: $model.selectedSkillID) { skill in
-                    SkillRow(skill: skill)
-                        .tag(skill.id)
-                }
                 .listStyle(.inset)
+                .overlay(alignment: .bottom) {
+                    if model.selectedSkillIDs.count > 1 {
+                        bulkActionBar
+                            .padding(SkillsManagerSpacing.large)
+                    }
+                }
             }
         }
-        .navigationTitle("Skills")
-        .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 420)
+        .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 460)
+        .confirmationDialog(
+            removalTitle,
+            isPresented: Binding(
+                get: { skillIDsPendingRemoval.isEmpty == false },
+                set: { isPresented in
+                    if isPresented == false {
+                        skillIDsPendingRemoval.removeAll()
+                    }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove from Library", role: .destructive) {
+                model.removeSkills(skillIDsPendingRemoval)
+                skillIDsPendingRemoval.removeAll()
+            }
+            Button("Cancel", role: .cancel) {
+                skillIDsPendingRemoval.removeAll()
+            }
+        } message: {
+            Text("The skill folders remain on disk.")
+        }
     }
 
-    private var emptyTitle: String {
-        if model.searchText.isEmpty {
-            return model.sources.isEmpty ? "Build Your Skill Library" : "No Skills Found"
+    private var emptyState: some View {
+        ContentUnavailableView {
+            Label(emptyContent.title, systemImage: emptyContent.systemImage)
+        } description: {
+            Text(emptyContent.description)
+        } actions: {
+            switch emptyContent.action {
+            case .addDirectory:
+                Button("Add Skill Directory", systemImage: "plus", action: addDirectory)
+                    .buttonStyle(.borderedProminent)
+            case .rescan(let sourceID):
+                Button("Rescan") {
+                    Task { @MainActor in
+                        do {
+                            try await model.rescanSource(sourceID)
+                        } catch {
+                            model.report(error, title: "Unable to Scan Directory")
+                        }
+                    }
+                }
+            case .searchAll:
+                Button("Search All Skills") {
+                    model.searchAllSkills()
+                }
+            case nil:
+                EmptyView()
+            }
+        }
+    }
+
+    private var bulkActionBar: some View {
+        HStack(spacing: SkillsManagerSpacing.medium) {
+            Text("\(model.selectedSkillIDs.count) selected")
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+
+            Button(bulkUpdateTitle, systemImage: "arrow.down.circle") {
+                model.updateSkills(model.selectedSkillIDs)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(selectedSkillsWithUpdates.isEmpty)
+
+            Button("Cancel") {
+                model.selectedSkillIDs.removeAll()
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, SkillsManagerSpacing.large)
+        .padding(.vertical, SkillsManagerSpacing.medium)
+        .skillsManagerPanel()
+        .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private func skillContextMenu(_ skill: AgentSkill) -> some View {
+        if skill.hasUpdate {
+            Button("Update", systemImage: "arrow.down.circle") {
+                model.updateSkills([skill.id])
+            }
         }
 
-        return "No Matching Skills"
+        Button(
+            skill.isEnabled ? "Disable" : "Enable",
+            systemImage: skill.isEnabled ? "pause.circle" : "play.circle"
+        ) {
+            model.setSkillsEnabled(!skill.isEnabled, skillIDs: [skill.id])
+        }
+
+        Button("Reveal in Finder", systemImage: "finder") {
+            NSWorkspace.shared.activateFileViewerSelecting([skill.directoryURL])
+        }
+
+        Divider()
+
+        Button("Remove…", systemImage: "minus.circle", role: .destructive) {
+            skillIDsPendingRemoval = [skill.id]
+        }
     }
 
-    private var emptySystemImage: String {
-        model.searchText.isEmpty ? "sparkles" : "magnifyingglass"
+    private var selectedSkillsWithUpdates: Set<AgentSkill.ID> {
+        Set(model.selectedSkills.filter(\.hasUpdate).map(\.id))
     }
 
-    private var emptyDescription: String {
-        if model.searchText.isEmpty {
-            if model.sources.isEmpty {
-                return "Add a directory to start discovering and managing agent skills."
+    private var bulkUpdateTitle: String {
+        model.selectedSkillIDs.count == 2 ? "Update Both" : "Update Selected"
+    }
+
+    private var removalTitle: String {
+        skillIDsPendingRemoval.count == 1 ? "Remove Skill?" : "Remove Selected Skills?"
+    }
+
+    private var emptyContent: EmptyContent {
+        if model.sources.isEmpty {
+            return EmptyContent(
+                title: "Build Your Skill Library",
+                systemImage: "sparkles",
+                description: "Add a directory to start managing skills.",
+                action: .addDirectory
+            )
+        }
+
+        if model.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            let description: String
+            if case .source(let sourceID) = model.sidebarSelection,
+                let source = model.source(for: sourceID)
+            {
+                description =
+                    "Nothing in \(source.displayName) matches “\(model.searchText)”."
+            } else {
+                description = "Try a different name, description, author, or folder."
             }
 
-            return "This directory does not contain any discovered skills yet."
+            return EmptyContent(
+                title: "No Matching Skills",
+                systemImage: "magnifyingglass",
+                description: description,
+                action: model.canSearchAllSkills ? .searchAll : nil
+            )
         }
 
-        return "Try a different name, description, author, or folder."
+        switch model.sidebarSelection {
+        case .source(let sourceID):
+            return EmptyContent(
+                title: "No Skills in This Directory",
+                systemImage: "folder",
+                description: "Skills Manager looks for folders containing a SKILL.md manifest.",
+                action: .rescan(sourceID)
+            )
+        case .updatesAvailable:
+            return EmptyContent(
+                title: "All Skills Are Up to Date",
+                systemImage: "checkmark.circle",
+                description: "There are no updates available.",
+                action: nil
+            )
+        case .disabled:
+            return EmptyContent(
+                title: "No Disabled Skills",
+                systemImage: "pause.circle",
+                description: "Disabled skills will appear here.",
+                action: nil
+            )
+        case .recentlyAdded:
+            return EmptyContent(
+                title: "No Recently Added Skills",
+                systemImage: "clock",
+                description: "Skills added in the last 14 days will appear here.",
+                action: nil
+            )
+        case .allSkills:
+            return EmptyContent(
+                title: "No Skills Found",
+                systemImage: "wand.and.stars",
+                description: "Add a directory or rescan an existing one.",
+                action: .addDirectory
+            )
+        }
     }
 }
 
 private struct SkillRow: View {
     let skill: AgentSkill
+    let isSelected: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "wand.and.sparkles")
+        HStack(spacing: SkillsManagerSpacing.medium) {
+            Image(systemName: "sparkles")
                 .font(.title3)
-                .foregroundStyle(.tint)
-                .frame(width: 28, height: 28)
+                .foregroundStyle(isSelected ? Color.white : Color.accentColor)
+                .frame(width: 44, height: 44)
+                .background(
+                    isSelected
+                        ? Color.white.opacity(0.2)
+                        : Color.secondary.opacity(0.12),
+                    in: .rect(cornerRadius: SkillsManagerRadius.row)
+                )
+                .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(skill.name)
                     .font(.headline)
+                    .foregroundStyle(isSelected ? Color.white : Color.primary)
                     .lineLimit(1)
 
                 Text(skill.summary)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .foregroundStyle(
+                        isSelected
+                            ? Color.white.opacity(0.84)
+                            : Color.secondary
+                    )
+                    .lineLimit(1)
             }
 
-            Spacer(minLength: 8)
+            Spacer(minLength: SkillsManagerSpacing.small)
 
-            if skill.managementState == .updateAvailable {
-                Image(systemName: "arrow.down.circle.fill")
-                    .foregroundStyle(.tint)
-                    .accessibilityLabel("Update available")
+            HStack(spacing: SkillsManagerSpacing.small) {
+                if skill.hasUpdate {
+                    Image(systemName: "arrow.down.circle")
+                        .foregroundStyle(isSelected ? Color.white : Color.accentColor)
+                        .accessibilityLabel("Update available")
+                }
+
+                if skill.isEnabled == false {
+                    Image(systemName: "pause.circle")
+                        .foregroundStyle(isSelected ? Color.white : Color.secondary)
+                        .accessibilityLabel("Disabled")
+                }
             }
         }
-        .padding(.vertical, 4)
+        .opacity(skill.isEnabled ? 1 : 0.55)
+        .padding(.vertical, SkillsManagerSpacing.extraSmall)
+        .contentShape(.rect)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel)
     }
+
+    private var accessibilityLabel: String {
+        [
+            skill.name,
+            skill.summary,
+            skill.hasUpdate ? "Update available" : nil,
+            skill.isEnabled ? nil : "Disabled",
+        ]
+        .compactMap { $0 }
+        .joined(separator: ", ")
+    }
+}
+
+private struct EmptyContent {
+    enum Action {
+        case addDirectory
+        case rescan(SkillSource.ID)
+        case searchAll
+    }
+
+    let title: String
+    let systemImage: String
+    let description: String
+    let action: Action?
 }

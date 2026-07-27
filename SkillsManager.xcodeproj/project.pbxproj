@@ -11,10 +11,12 @@
 		21D6A6770E2DD650E15DB662 /* SkillLibraryModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A6FD9583210F461B8C10058 /* SkillLibraryModelTests.swift */; };
 		2678B79191361B36FBEE9437 /* SkillLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D215E0EA89D2A7E8FD5C62D6 /* SkillLibraryView.swift */; };
 		3D07750A323450A9DDD445DF /* SkillsManagerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4816B3E9012AB1F4A53BEE77 /* SkillsManagerApp.swift */; };
+		472ABA4A6D4D769104F1E4CF /* SkillSourceAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 722F8D554E99C8E055634971 /* SkillSourceAccess.swift */; };
 		7D8580E826C0150748097DF1 /* SkillList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 967846C50FEAD77DB44AC053 /* SkillList.swift */; };
 		81712A7A5CC04311C93C9225 /* SkillSourceSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A4E285DCEC62A32FE2BCFD8 /* SkillSourceSidebar.swift */; };
 		969AE94BB0DE1FD72398A99D /* SkillsCore in Frameworks */ = {isa = PBXBuildFile; productRef = 3380F0FCA4019E2DFC6388F0 /* SkillsCore */; };
 		A054C71A0EC9029586CD2F55 /* SkillLibraryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28D3397F722CA129DBB67F0A /* SkillLibraryModel.swift */; };
+		A3D1267B7D889E980B6C99BB /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D8D325A1E549792739338CA /* DesignTokens.swift */; };
 		CA29195A1FF04878D57D9EE5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D298670C70296E0E9836ADF9 /* Assets.xcassets */; };
 		D5156E96647BF72A903EAA2B /* SkillDetail.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798333DD8A836A78860F88DF /* SkillDetail.swift */; };
 		F7233070FC6391CCC26991DE /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E95C035BE8E05F56821929B1 /* SettingsView.swift */; };
@@ -34,11 +36,13 @@
 		1F32267ADF6DE133229BEE84 /* GlassPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassPanel.swift; sourceTree = "<group>"; };
 		2104245FFF577B2FF9088F8A /* CLAUDE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = CLAUDE.md; sourceTree = "<group>"; };
 		28D3397F722CA129DBB67F0A /* SkillLibraryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryModel.swift; sourceTree = "<group>"; };
+		2D8D325A1E549792739338CA /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
 		3EC9162967D67E2AA7841E22 /* SkillsManagerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SkillsManagerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		45D33B62086982B7ED9100D8 /* AGENTS.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = AGENTS.md; sourceTree = "<group>"; };
 		4816B3E9012AB1F4A53BEE77 /* SkillsManagerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillsManagerApp.swift; sourceTree = "<group>"; };
 		6A4E285DCEC62A32FE2BCFD8 /* SkillSourceSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillSourceSidebar.swift; sourceTree = "<group>"; };
 		71E86521947227FAD14E43AA /* SkillsManager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SkillsManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		722F8D554E99C8E055634971 /* SkillSourceAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillSourceAccess.swift; sourceTree = "<group>"; };
 		798333DD8A836A78860F88DF /* SkillDetail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillDetail.swift; sourceTree = "<group>"; };
 		8A6FD9583210F461B8C10058 /* SkillLibraryModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryModelTests.swift; sourceTree = "<group>"; };
 		9012D9D210AEF08DCBE01777 /* ARCHITECTURE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ARCHITECTURE.md; sourceTree = "<group>"; };
@@ -98,6 +102,7 @@
 		4393B119C7A4DAF93940DECA /* VisualStyle */ = {
 			isa = PBXGroup;
 			children = (
+				2D8D325A1E549792739338CA /* DesignTokens.swift */,
 				1F32267ADF6DE133229BEE84 /* GlassPanel.swift */,
 			);
 			path = VisualStyle;
@@ -108,6 +113,7 @@
 			children = (
 				28D3397F722CA129DBB67F0A /* SkillLibraryModel.swift */,
 				4816B3E9012AB1F4A53BEE77 /* SkillsManagerApp.swift */,
+				722F8D554E99C8E055634971 /* SkillSourceAccess.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -309,12 +315,14 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A3D1267B7D889E980B6C99BB /* DesignTokens.swift in Sources */,
 				02175322C2007528697F5AE3 /* GlassPanel.swift in Sources */,
 				F7233070FC6391CCC26991DE /* SettingsView.swift in Sources */,
 				D5156E96647BF72A903EAA2B /* SkillDetail.swift in Sources */,
 				A054C71A0EC9029586CD2F55 /* SkillLibraryModel.swift in Sources */,
 				2678B79191361B36FBEE9437 /* SkillLibraryView.swift in Sources */,
 				7D8580E826C0150748097DF1 /* SkillList.swift in Sources */,
+				472ABA4A6D4D769104F1E4CF /* SkillSourceAccess.swift in Sources */,
 				81712A7A5CC04311C93C9225 /* SkillSourceSidebar.swift in Sources */,
 				3D07750A323450A9DDD445DF /* SkillsManagerApp.swift in Sources */,
 			);

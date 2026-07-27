@@ -1,13 +1,14 @@
 import SwiftUI
 
 extension View {
-    func skillsManagerPanel(cornerRadius: CGFloat = 18) -> some View {
+    func skillsManagerPanel(cornerRadius: CGFloat = SkillsManagerRadius.floating) -> some View {
         modifier(SkillsManagerPanelModifier(cornerRadius: cornerRadius))
     }
 }
 
 private struct SkillsManagerPanelModifier: ViewModifier {
     let cornerRadius: CGFloat
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     @ViewBuilder
     func body(content: Content) -> some View {
@@ -29,10 +30,15 @@ private struct SkillsManagerPanelModifier: ViewModifier {
                         style: .continuous
                     )
                     .stroke(
-                        Color(nsColor: .separatorColor).opacity(0.45),
-                        lineWidth: 0.5
+                        separatorColor,
+                        lineWidth: colorSchemeContrast == .increased ? 1 : 0.5
                     )
                 }
         }
+    }
+
+    private var separatorColor: Color {
+        let color = Color(nsColor: .separatorColor)
+        return colorSchemeContrast == .increased ? color : color.opacity(0.45)
     }
 }
