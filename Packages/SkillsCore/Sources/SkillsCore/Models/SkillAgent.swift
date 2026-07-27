@@ -1,6 +1,9 @@
 import Foundation
 
 public enum SkillAgent: String, CaseIterable, Codable, Identifiable, Sendable {
+    /// The cross-agent location every tool that follows the `~/.agents/skills`
+    /// convention reads, including Codex. Both cases resolve to the same folder.
+    case global
     case claudeCode
     case codex
     case cursor
@@ -12,6 +15,8 @@ public enum SkillAgent: String, CaseIterable, Codable, Identifiable, Sendable {
 
     public var displayName: String {
         switch self {
+        case .global:
+            "Global"
         case .claudeCode:
             "Claude Code"
         case .codex:
@@ -29,6 +34,8 @@ public enum SkillAgent: String, CaseIterable, Codable, Identifiable, Sendable {
 
     public var defaultSkillsDirectoryRelativePath: String? {
         switch self {
+        case .global:
+            ".agents/skills"
         case .claudeCode:
             ".claude/skills"
         case .codex:

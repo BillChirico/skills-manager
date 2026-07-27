@@ -8,10 +8,11 @@ The current product surface includes:
 - a SwiftUI three-column library with smart groups, scoped search, multi-select,
   detail tabs, and recovery-focused empty states;
 - persistent user-selected directories backed by security-scoped bookmarks;
-- suggested user skill locations for Claude Code, Codex, Cursor, Gemini, and
-  GitHub Copilot, while retaining a picker for custom directories;
-- per-directory agent assignments for Claude Code, Codex, Cursor, Gemini,
-  GitHub Copilot, and other tools;
+- one-click suggested locations for the shared `~/.agents/skills` folder, Claude
+  Code, Codex, Cursor, Gemini, and GitHub Copilot, listed only while the folder
+  exists, plus a picker for any other directory;
+- per-directory agent assignments for Global, Claude Code, Codex, Cursor,
+  Gemini, GitHub Copilot, and other tools;
 - local `SKILL.md` discovery with stable skill identities across rescans;
 - skills.sh search and one-click installation for GitHub-backed catalog skills;
 - name, date-added, and agent sorting, with the agent and source shown on every
@@ -85,14 +86,25 @@ skill on skills.sh or inspect its files before using it with an agent.
 
 ## Directory access
 
-Settings lists every configured skill folder. Its plus menu includes each
-supported agent’s standard user location, including `~/.agents/skills` for
-Codex and `~/.claude/skills` for Claude Code, along with custom locations.
-Choosing a suggestion opens the system directory picker at that location; the
-app remains sandboxed, so the user must confirm the folder before Skills
-Manager can scan it. Empty library states open Settings rather than duplicating
-this picker flow. Settings itself includes an Add Folder action when the list is
-empty.
+Settings lists every configured skill folder. Its plus menu suggests each
+supported agent’s standard user location — `Global — ~/.agents/skills`,
+`Claude Code — ~/.claude/skills`, and the rest — and lists a suggestion only
+while that folder exists on the account home, so the menu never offers a folder
+you have not created. Choosing one adds it directly, with no picker step. A
+single `Add Folder…` action below the suggestions opens the system picker for
+any other directory.
+
+`Global` and `Codex` both resolve to `~/.agents/skills`, the cross-agent
+convention Codex also reads, so both suggestions appear when that folder exists.
+Adding the second one re-selects the folder the first one configured instead of
+listing it twice.
+
+Direct add works whenever Skills Manager already has access to the folder. A
+sandboxed build only receives access to folders the user confirms, so when the
+sandbox denies a suggestion the app falls back to the system directory picker
+opened at that same location. Empty library states open Settings rather than
+duplicating this picker flow. Settings itself includes an Add Folder action when
+the list is empty.
 
 Confirmed directories are opened as security-scoped resources before the app
 creates and stores their bookmarks. This keeps the initial scan and access after

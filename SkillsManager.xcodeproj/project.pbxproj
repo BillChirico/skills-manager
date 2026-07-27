@@ -19,12 +19,15 @@
 		472ABA4A6D4D769104F1E4CF /* SkillSourceAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 722F8D554E99C8E055634971 /* SkillSourceAccess.swift */; };
 		525A709858A9AD41D75D99B0 /* SkillAgent+Presentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8091891E4D7B5CB7043BACC1 /* SkillAgent+Presentation.swift */; };
 		532A329985E27486B05C5193 /* SkillsManagerAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4BFFAD3E6AB156341E9F95B /* SkillsManagerAppTests.swift */; };
+		5D5602FFD0D40D41CB932098 /* UserHomeDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0CC42992263A0D1F972483A /* UserHomeDirectory.swift */; };
 		65F55ED1141CC3500D8264D2 /* SkillCatalogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E400BD791ADC589ADFD33C19 /* SkillCatalogView.swift */; };
 		7D8580E826C0150748097DF1 /* SkillList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 967846C50FEAD77DB44AC053 /* SkillList.swift */; };
 		81712A7A5CC04311C93C9225 /* SkillSourceSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A4E285DCEC62A32FE2BCFD8 /* SkillSourceSidebar.swift */; };
 		969AE94BB0DE1FD72398A99D /* SkillsCore in Frameworks */ = {isa = PBXBuildFile; productRef = 3380F0FCA4019E2DFC6388F0 /* SkillsCore */; };
+		9FE0E6E63FEF7FF63104AECD /* AgentDirectorySuggestionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF2BB7108DAA871E5BBE3B3E /* AgentDirectorySuggestionTests.swift */; };
 		A054C71A0EC9029586CD2F55 /* SkillLibraryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28D3397F722CA129DBB67F0A /* SkillLibraryModel.swift */; };
 		A3D1267B7D889E980B6C99BB /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D8D325A1E549792739338CA /* DesignTokens.swift */; };
+		B7BAC2D0176AB0199033C77A /* AgentDirectorySuggestion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 567279ACF7EB9807D8FBBD49 /* AgentDirectorySuggestion.swift */; };
 		CA29195A1FF04878D57D9EE5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D298670C70296E0E9836ADF9 /* Assets.xcassets */; };
 		D5156E96647BF72A903EAA2B /* SkillDetail.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798333DD8A836A78860F88DF /* SkillDetail.swift */; };
 		F4A10445C675EABDC1AFC8AF /* SkillLibraryOrganizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A08B991B2714753A37B17F5B /* SkillLibraryOrganizationTests.swift */; };
@@ -51,6 +54,7 @@
 		4816B3E9012AB1F4A53BEE77 /* SkillsManagerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillsManagerApp.swift; sourceTree = "<group>"; };
 		4A52F3B3441ED487F6728B46 /* SkillCatalogModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillCatalogModel.swift; sourceTree = "<group>"; };
 		560792EB417C14855F48371C /* 2026-07-27-folder-settings.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "2026-07-27-folder-settings.md"; sourceTree = "<group>"; };
+		567279ACF7EB9807D8FBBD49 /* AgentDirectorySuggestion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDirectorySuggestion.swift; sourceTree = "<group>"; };
 		6A4E285DCEC62A32FE2BCFD8 /* SkillSourceSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillSourceSidebar.swift; sourceTree = "<group>"; };
 		71E86521947227FAD14E43AA /* SkillsManager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SkillsManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		722F8D554E99C8E055634971 /* SkillSourceAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillSourceAccess.swift; sourceTree = "<group>"; };
@@ -66,11 +70,13 @@
 		AF38AD0F106FB2D04588BFCD /* 2026-07-27-folder-settings-review-followup-design.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "2026-07-27-folder-settings-review-followup-design.md"; sourceTree = "<group>"; };
 		B5B42EA428CD24B04056DDE1 /* SkillCatalogModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillCatalogModelTests.swift; sourceTree = "<group>"; };
 		BB03C98862CC786DC11BBEC3 /* FolderSettingsSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderSettingsSelectionTests.swift; sourceTree = "<group>"; };
+		C0CC42992263A0D1F972483A /* UserHomeDirectory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserHomeDirectory.swift; sourceTree = "<group>"; };
 		D0EED475D6F3CC38D0FCFFD2 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		D215E0EA89D2A7E8FD5C62D6 /* SkillLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryView.swift; sourceTree = "<group>"; };
 		D298670C70296E0E9836ADF9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		D3629868252908B899455D16 /* 2026-07-27-folder-settings-review-followup.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "2026-07-27-folder-settings-review-followup.md"; sourceTree = "<group>"; };
 		DD2138FB85F681287F0500AD /* SkillLibraryScopeTitleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryScopeTitleTests.swift; sourceTree = "<group>"; };
+		DF2BB7108DAA871E5BBE3B3E /* AgentDirectorySuggestionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDirectorySuggestionTests.swift; sourceTree = "<group>"; };
 		E400BD791ADC589ADFD33C19 /* SkillCatalogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillCatalogView.swift; sourceTree = "<group>"; };
 		E6DD7D944224CEC48C29FE22 /* 2026-07-27-folder-settings-design.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "2026-07-27-folder-settings-design.md"; sourceTree = "<group>"; };
 		E95C035BE8E05F56821929B1 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -92,6 +98,7 @@
 		1CAD9EE44874A4855199C874 /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				567279ACF7EB9807D8FBBD49 /* AgentDirectorySuggestion.swift */,
 				E95C035BE8E05F56821929B1 /* SettingsView.swift */,
 			);
 			path = Settings;
@@ -143,6 +150,7 @@
 				28D3397F722CA129DBB67F0A /* SkillLibraryModel.swift */,
 				4816B3E9012AB1F4A53BEE77 /* SkillsManagerApp.swift */,
 				722F8D554E99C8E055634971 /* SkillSourceAccess.swift */,
+				C0CC42992263A0D1F972483A /* UserHomeDirectory.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -265,6 +273,7 @@
 		D7C37D869B0502FC3B7BDA67 /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				DF2BB7108DAA871E5BBE3B3E /* AgentDirectorySuggestionTests.swift */,
 				BB03C98862CC786DC11BBEC3 /* FolderSettingsSelectionTests.swift */,
 			);
 			path = Settings;
@@ -390,6 +399,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9FE0E6E63FEF7FF63104AECD /* AgentDirectorySuggestionTests.swift in Sources */,
 				274010532DA2BEA0563ADF53 /* FolderSettingsSelectionTests.swift in Sources */,
 				33E95BDDB4C71F7967E8CF92 /* SkillCatalogModelTests.swift in Sources */,
 				21D6A6770E2DD650E15DB662 /* SkillLibraryModelTests.swift in Sources */,
@@ -403,6 +413,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B7BAC2D0176AB0199033C77A /* AgentDirectorySuggestion.swift in Sources */,
 				A3D1267B7D889E980B6C99BB /* DesignTokens.swift in Sources */,
 				02175322C2007528697F5AE3 /* GlassPanel.swift in Sources */,
 				F7233070FC6391CCC26991DE /* SettingsView.swift in Sources */,
@@ -417,6 +428,7 @@
 				81712A7A5CC04311C93C9225 /* SkillSourceSidebar.swift in Sources */,
 				3D07750A323450A9DDD445DF /* SkillsManagerApp.swift in Sources */,
 				2AB3DEA01BB887D5C3C0F32F /* ToolbarSearchFieldWidth.swift in Sources */,
+				5D5602FFD0D40D41CB932098 /* UserHomeDirectory.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

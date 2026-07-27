@@ -199,12 +199,7 @@ struct SettingsView: View {
 
     private var addFolderMenu: some View {
         Menu {
-            AgentDirectoryMenuContent { agent, defaultDirectory in
-                beginAddingFolder(
-                    for: agent,
-                    defaultDirectory: defaultDirectory
-                )
-            }
+            agentDirectoryMenu
         } label: {
             Label("Add Folder", systemImage: "plus")
                 .labelStyle(.iconOnly)
@@ -214,16 +209,20 @@ struct SettingsView: View {
 
     private var emptyStateAddFolderMenu: some View {
         Menu {
-            AgentDirectoryMenuContent { agent, defaultDirectory in
-                beginAddingFolder(
-                    for: agent,
-                    defaultDirectory: defaultDirectory
-                )
-            }
+            agentDirectoryMenu
         } label: {
             Label("Add Folder", systemImage: "plus")
         }
         .help("Add a folder that contains an agent’s skills")
+    }
+
+    private var agentDirectoryMenu: some View {
+        AgentDirectoryMenuContent(
+            addSuggestedDirectory: addSuggestedFolder,
+            chooseAnotherDirectory: {
+                beginAddingFolder(for: .other, defaultDirectory: nil)
+            }
+        )
     }
 
     private var selectedSource: SkillSource? {
@@ -349,6 +348,30 @@ struct SettingsView: View {
         }
     }
 
+    /// Adds a suggested agent folder without asking the user to locate it again.
+    ///
+    /// The sandbox only extends read access to folders the user confirms, so a
+    /// denied add falls back to the picker rooted at the same location instead of
+    /// reporting a dead end. Every other failure is a real error and is reported.
+    private func addSuggestedFolder(_ suggestion: AgentDirectorySuggestion) {
+        Task { @MainActor in
+            do {
+                try await model.addSource(
+                    at: suggestion.directoryURL,
+                    agent: suggestion.agent
+                )
+                selectAddedSource()
+            } catch SkillLibraryModel.SourceAccessError.accessDenied {
+                beginAddingFolder(
+                    for: suggestion.agent,
+                    defaultDirectory: suggestion.directoryURL
+                )
+            } catch {
+                model.report(error, title: "Unable to Add Folder")
+            }
+        }
+    }
+
     private func beginAddingFolder(
         for agent: SkillAgent,
         defaultDirectory: URL?
@@ -410,17 +433,21 @@ struct SettingsView: View {
                     folderSelection.sourceID = reconnectSourceID
                 } else {
                     try await model.addSource(at: folderURL, agent: agent)
-                    folderSelection.reconcile(with: model.sources)
-
-                    if case .source(let sourceID) = model.sidebarSelection {
-                        folderSelection.sourceID = sourceID
-                    }
+                    selectAddedSource()
                 }
             } catch let error as CocoaError where error.code == .userCancelled {
                 return
             } catch {
                 model.report(error, title: errorTitle)
             }
+        }
+    }
+
+    private func selectAddedSource() {
+        folderSelection.reconcile(with: model.sources)
+
+        if case .source(let sourceID) = model.sidebarSelection {
+            folderSelection.sourceID = sourceID
         }
     }
 
@@ -465,7 +492,7 @@ struct FolderSettingsRowPresentation {
     init(
         source: SkillSource,
         state: SkillLibraryModel.SourceState,
-        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+        homeDirectory: URL = UserHomeDirectory.current
     ) {
         displayPath = Self.displayPath(
             for: source.directoryURL,
@@ -526,42 +553,42 @@ struct FolderSettingsRowPresentation {
 }
 
 struct AgentDirectoryMenuContent: View {
-    let chooseDirectory: (SkillAgent, URL?) -> Void
-    var homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    /// Adds a standard agent location that already exists, without a picker.
+    let addSuggestedDirectory: (AgentDirectorySuggestion) -> Void
+    /// Opens the system picker so the user can add any other folder.
+    let chooseAnotherDirectory: () -> Void
+    var homeDirectory: URL = UserHomeDirectory.current
+    var directoryExists: (URL) -> Bool = AgentDirectorySuggestion.directoryExists(at:)
 
     var body: some View {
-        Section("Suggested Locations") {
-            ForEach(agentsWithDefaultDirectory) { agent in
-                if let relativePath = agent.defaultSkillsDirectoryRelativePath {
+        if suggestions.isEmpty == false {
+            Section("Suggested Locations") {
+                ForEach(suggestions) { suggestion in
                     Button {
-                        chooseDirectory(
-                            agent,
-                            agent.defaultSkillsDirectory(in: homeDirectory)
-                        )
+                        addSuggestedDirectory(suggestion)
                     } label: {
                         Label(
-                            "\(agent.displayName) — ~/\(relativePath)",
-                            systemImage: agent.systemImage
+                            suggestion.title,
+                            systemImage: suggestion.agent.systemImage
                         )
                     }
                 }
             }
         }
 
-        Section("Choose Another Folder") {
-            ForEach(SkillAgent.allCases) { agent in
-                Button {
-                    chooseDirectory(agent, nil)
-                } label: {
-                    Label(agent.displayName, systemImage: agent.systemImage)
-                }
-            }
+        Button {
+            chooseAnotherDirectory()
+        } label: {
+            Label("Add Folder…", systemImage: "folder.badge.plus")
         }
     }
 
-    private var agentsWithDefaultDirectory: [SkillAgent] {
-        SkillAgent.allCases.filter {
-            $0.defaultSkillsDirectoryRelativePath != nil
-        }
+    /// Recomputed for each presentation because the user can create an agent's
+    /// folder while Skills Manager is running.
+    private var suggestions: [AgentDirectorySuggestion] {
+        AgentDirectorySuggestion.suggestions(
+            in: homeDirectory,
+            directoryExists: directoryExists
+        )
     }
 }

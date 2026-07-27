@@ -3,6 +3,8 @@ import SkillsCore
 extension SkillAgent {
     var systemImage: String {
         switch self {
+        case .global:
+            "globe"
         case .claudeCode:
             "brain"
         case .codex:

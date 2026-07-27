@@ -45,6 +45,7 @@ struct SkillAgentTests {
     @Test(
         "Known agents expose their standard user skill directories",
         arguments: [
+            DefaultDirectoryCase(agent: .global, relativePath: ".agents/skills"),
             DefaultDirectoryCase(agent: .claudeCode, relativePath: ".claude/skills"),
             DefaultDirectoryCase(agent: .codex, relativePath: ".agents/skills"),
             DefaultDirectoryCase(agent: .cursor, relativePath: ".cursor/skills"),
@@ -66,6 +67,26 @@ struct SkillAgentTests {
         #expect(
             testCase.agent.defaultSkillsDirectory(in: homeDirectory)
                 == expectedURL
+        )
+    }
+
+    @Test("The shared agent location leads the agent list under its own name")
+    func globalAgentLeadsTheAgentList() {
+        #expect(SkillAgent.global.displayName == "Global")
+        #expect(SkillAgent.allCases.first == .global)
+    }
+
+    /// `Global` and `Codex` deliberately resolve to one folder: `~/.agents/skills`
+    /// is the cross-agent convention that Codex also reads. Two suggestions can
+    /// therefore point at the same directory, and adding the second one selects the
+    /// source the first one created instead of duplicating it.
+    @Test("The shared agent location and Codex resolve to the same directory")
+    func globalAndCodexShareADirectory() {
+        let homeDirectory = URL(filePath: "/Users/example", directoryHint: .isDirectory)
+
+        #expect(
+            SkillAgent.global.defaultSkillsDirectory(in: homeDirectory)
+                == SkillAgent.codex.defaultSkillsDirectory(in: homeDirectory)
         )
     }
 
