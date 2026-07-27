@@ -15,6 +15,7 @@
 		3D07750A323450A9DDD445DF /* SkillsManagerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4816B3E9012AB1F4A53BEE77 /* SkillsManagerApp.swift */; };
 		472ABA4A6D4D769104F1E4CF /* SkillSourceAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 722F8D554E99C8E055634971 /* SkillSourceAccess.swift */; };
 		525A709858A9AD41D75D99B0 /* SkillAgent+Presentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8091891E4D7B5CB7043BACC1 /* SkillAgent+Presentation.swift */; };
+		532A329985E27486B05C5193 /* SkillsManagerAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4BFFAD3E6AB156341E9F95B /* SkillsManagerAppTests.swift */; };
 		65F55ED1141CC3500D8264D2 /* SkillCatalogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E400BD791ADC589ADFD33C19 /* SkillCatalogView.swift */; };
 		7D8580E826C0150748097DF1 /* SkillList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 967846C50FEAD77DB44AC053 /* SkillList.swift */; };
 		81712A7A5CC04311C93C9225 /* SkillSourceSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A4E285DCEC62A32FE2BCFD8 /* SkillSourceSidebar.swift */; };
@@ -56,6 +57,7 @@
 		967846C50FEAD77DB44AC053 /* SkillList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillList.swift; sourceTree = "<group>"; };
 		9D8C677DEC993CE4CF7548D8 /* SkillsManager.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SkillsManager.entitlements; sourceTree = "<group>"; };
 		A08B991B2714753A37B17F5B /* SkillLibraryOrganizationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryOrganizationTests.swift; sourceTree = "<group>"; };
+		A4BFFAD3E6AB156341E9F95B /* SkillsManagerAppTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillsManagerAppTests.swift; sourceTree = "<group>"; };
 		B5B42EA428CD24B04056DDE1 /* SkillCatalogModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillCatalogModelTests.swift; sourceTree = "<group>"; };
 		D0EED475D6F3CC38D0FCFFD2 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		D215E0EA89D2A7E8FD5C62D6 /* SkillLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryView.swift; sourceTree = "<group>"; };
@@ -98,6 +100,7 @@
 			children = (
 				8A6FD9583210F461B8C10058 /* SkillLibraryModelTests.swift */,
 				A08B991B2714753A37B17F5B /* SkillLibraryOrganizationTests.swift */,
+				A4BFFAD3E6AB156341E9F95B /* SkillsManagerAppTests.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -341,6 +344,7 @@
 				33E95BDDB4C71F7967E8CF92 /* SkillCatalogModelTests.swift in Sources */,
 				21D6A6770E2DD650E15DB662 /* SkillLibraryModelTests.swift in Sources */,
 				F4A10445C675EABDC1AFC8AF /* SkillLibraryOrganizationTests.swift in Sources */,
+				532A329985E27486B05C5193 /* SkillsManagerAppTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
