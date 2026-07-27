@@ -31,6 +31,9 @@ those APIs are macOS-specific. The model receives persistence and discovery
 dependencies through protocols rather than reaching for global state. A
 separate catalog model coordinates debounced skills.sh searches and
 installations so network and filesystem work remain independently testable.
+Agent models expose their standard user skill-directory paths, which the app
+uses as picker starting points without bypassing the sandbox’s user-consent
+boundary.
 
 ## Domain layer
 
@@ -76,7 +79,10 @@ The app sandbox permits outbound network access, user-selected read/write
 access, and app-scoped bookmarks. Directory grants are stored as
 security-scoped bookmarks, resolved on launch, and held only while their source
 remains configured. Failed resolution is surfaced as an unavailable source
-instead of an empty library.
+instead of an empty library. A URL returned by the directory picker must be
+opened with `startAccessingSecurityScopedResource()` before bookmark creation;
+add and relocation operations release that access and roll back state if
+bookmarking or persistence fails.
 
 ## Project generation
 

@@ -4,7 +4,7 @@ import SwiftUI
 
 struct SkillList: View {
     @Bindable var model: SkillLibraryModel
-    let addDirectory: (SkillAgent) -> Void
+    let addDirectory: (SkillAgent, URL?) -> Void
     @State private var skillIDsPendingRemoval: Set<AgentSkill.ID> = []
 
     var body: some View {
@@ -67,13 +67,7 @@ struct SkillList: View {
             switch emptyContent.action {
             case .addDirectory:
                 Menu("Add Agent Directory", systemImage: "folder.badge.plus") {
-                    ForEach(SkillAgent.allCases) { agent in
-                        Button {
-                            addDirectory(agent)
-                        } label: {
-                            Label(agent.displayName, systemImage: agent.systemImage)
-                        }
-                    }
+                    AgentDirectoryMenuContent(chooseDirectory: addDirectory)
                 }
                 .menuStyle(.button)
                 .buttonStyle(.borderedProminent)

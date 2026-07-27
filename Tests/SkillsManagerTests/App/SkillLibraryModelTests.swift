@@ -30,6 +30,81 @@ struct SkillLibraryModelTests {
         #expect(model.sources.count == 1)
     }
 
+    @Test(
+        "Adding a selected directory opens its security scope before bookmarking",
+        .bug(id: 8)
+    )
+    func opensSecurityScopeBeforeBookmarking() async throws {
+        let accessState = ScopedDirectoryAccessState()
+        let sourceAccess = AccessTrackingSourceAccess(state: accessState)
+        let bookmarker = AccessRequiringBookmarker(state: accessState)
+        let store = MemorySourceStore()
+        let model = SkillLibraryModel(
+            sourceStore: store,
+            discoverer: EmptyDiscoverer(),
+            bookmarker: bookmarker,
+            sourceAccess: sourceAccess
+        )
+        let directoryURL = URL(filePath: "/skills/codex", directoryHint: .isDirectory)
+
+        try await model.addSource(at: directoryURL, agent: .codex)
+
+        let source = try #require(model.sources.first)
+        #expect(source.bookmarkData == Data(directoryURL.path.utf8))
+        #expect(model.sourceState(for: source.id) == .available)
+        #expect(accessState.isAccessing(directoryURL))
+        #expect(await store.loadSources() == [source])
+    }
+
+    @Test("A bookmark failure releases access and does not add the directory")
+    func bookmarkFailureRollsBackAccess() async {
+        let accessState = ScopedDirectoryAccessState()
+        let model = SkillLibraryModel(
+            sourceStore: MemorySourceStore(),
+            bookmarker: AccessRequiringBookmarker(
+                state: accessState,
+                failure: .intentionalFailure
+            ),
+            sourceAccess: AccessTrackingSourceAccess(state: accessState)
+        )
+        let directoryURL = URL(filePath: "/skills/failing", directoryHint: .isDirectory)
+
+        await #expect(
+            throws: AccessRequiringBookmarker.BookmarkError.intentionalFailure
+        ) {
+            try await model.addSource(at: directoryURL)
+        }
+
+        #expect(model.sources.isEmpty)
+        #expect(accessState.isAccessing(directoryURL) == false)
+    }
+
+    @Test("Relocating opens the replacement security scope before bookmarking")
+    func opensReplacementScopeBeforeBookmarking() async throws {
+        let source = SkillSource(
+            name: "Team Skills",
+            directoryURL: URL(filePath: "/skills/old", directoryHint: .isDirectory)
+        )
+        let accessState = ScopedDirectoryAccessState()
+        let model = SkillLibraryModel(
+            sources: [source],
+            sourceStore: MemorySourceStore(sources: [source]),
+            bookmarker: AccessRequiringBookmarker(state: accessState),
+            sourceAccess: AccessTrackingSourceAccess(state: accessState)
+        )
+        let replacementURL = URL(
+            filePath: "/skills/replacement",
+            directoryHint: .isDirectory
+        )
+
+        try await model.relocateSource(source.id, to: replacementURL)
+
+        let relocatedSource = try #require(model.sources.first)
+        #expect(relocatedSource.directoryURL == replacementURL)
+        #expect(relocatedSource.bookmarkData == Data(replacementURL.path.utf8))
+        #expect(accessState.isAccessing(replacementURL))
+    }
+
     @Test("Smart groups expose consistent counts and filtering")
     func smartGroupCounts() {
         let now = Date(timeIntervalSince1970: 2_000_000)
@@ -506,5 +581,89 @@ private struct RecoveryBookmarker: SkillSourceBookmarking {
 
     func resolveBookmark(_ data: Data) throws -> ResolvedSkillSourceBookmark {
         ResolvedSkillSourceBookmark(url: resolvedURL, isStale: false)
+    }
+}
+
+private final class ScopedDirectoryAccessState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var activeURLs: Set<URL> = []
+
+    func beginAccessing(_ url: URL) {
+        lock.withLock {
+            activeURLs.insert(url.standardizedFileURL)
+        }
+    }
+
+    func stopAccessing(_ url: URL) {
+        lock.withLock {
+            activeURLs.remove(url.standardizedFileURL)
+        }
+    }
+
+    func isAccessing(_ url: URL) -> Bool {
+        lock.withLock {
+            activeURLs.contains(url.standardizedFileURL)
+        }
+    }
+}
+
+@MainActor
+private final class AccessTrackingSourceAccess: SkillSourceAccessing {
+    private let state: ScopedDirectoryAccessState
+    private var activeURLs: [SkillSource.ID: URL] = [:]
+
+    init(state: ScopedDirectoryAccessState) {
+        self.state = state
+    }
+
+    func beginAccessing(_ url: URL, for sourceID: SkillSource.ID) -> Bool {
+        stopAccessing(sourceID: sourceID)
+        activeURLs[sourceID] = url
+        state.beginAccessing(url)
+        return true
+    }
+
+    func stopAccessing(sourceID: SkillSource.ID) {
+        guard let url = activeURLs.removeValue(forKey: sourceID) else {
+            return
+        }
+
+        state.stopAccessing(url)
+    }
+}
+
+private struct AccessRequiringBookmarker: SkillSourceBookmarking {
+    enum BookmarkError: Error {
+        case accessRequired
+        case intentionalFailure
+    }
+
+    let state: ScopedDirectoryAccessState
+    let failure: BookmarkError?
+
+    init(
+        state: ScopedDirectoryAccessState,
+        failure: BookmarkError? = nil
+    ) {
+        self.state = state
+        self.failure = failure
+    }
+
+    func makeBookmark(for url: URL) throws -> Data {
+        guard state.isAccessing(url) else {
+            throw BookmarkError.accessRequired
+        }
+        if let failure {
+            throw failure
+        }
+
+        return Data(url.path.utf8)
+    }
+
+    func resolveBookmark(_ data: Data) throws -> ResolvedSkillSourceBookmark {
+        ResolvedSkillSourceBookmark(
+            url: URL(filePath: String(decoding: data, as: UTF8.self)),
+            isStale: false
+        )
     }
 }
