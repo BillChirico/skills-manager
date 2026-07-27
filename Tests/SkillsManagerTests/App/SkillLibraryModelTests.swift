@@ -178,6 +178,114 @@ struct SkillLibraryModelTests {
         #expect(model.selectedSkillIDs == [existingSkill.id])
     }
 
+    @Test("Relocating an unavailable directory preserves source and skill identity")
+    func relocatingUnavailableSourceRecoversInPlace() async throws {
+        let source = SkillSource(
+            name: "Team Skills",
+            directoryURL: URL(filePath: "/skills/old-team"),
+            bookmarkData: Data("expired-bookmark".utf8)
+        )
+        let existingSkill = AgentSkill(
+            name: "Discovered Skill",
+            summary: "Old summary.",
+            installedVersion: "1.0.0",
+            availableVersion: "2.0.0",
+            directoryURL: source.directoryURL.appending(path: "discovered"),
+            sourceID: source.id,
+            relativePath: "discovered",
+            isEnabled: false
+        )
+        let store = MemorySourceStore(sources: [source])
+        let sourceAccess = DenyFirstSourceAccess()
+        let model = SkillLibraryModel(
+            sources: [source],
+            skills: [existingSkill],
+            sourceStore: store,
+            discoverer: UpdatedFixtureDiscoverer(),
+            bookmarker: RecoveryBookmarker(resolvedURL: source.directoryURL),
+            sourceAccess: sourceAccess
+        )
+        model.sidebarSelection = .source(source.id)
+        model.selectedSkillIDs = [existingSkill.id]
+
+        await model.restoreSources()
+
+        #expect(model.sourceState(for: source.id) == .unavailable)
+
+        let relocatedURL = URL(filePath: "/skills/relocated/team")
+        try await model.relocateSource(source.id, to: relocatedURL)
+
+        let relocatedSource = try #require(model.sources.first)
+        let relocatedSkill = try #require(model.skills.first)
+        let persistedSources = await store.loadSources()
+        #expect(model.sources.count == 1)
+        #expect(relocatedSource.id == source.id)
+        #expect(relocatedSource.name == source.name)
+        #expect(relocatedSource.directoryURL == relocatedURL)
+        #expect(relocatedSource.bookmarkData == Data("/skills/relocated/team".utf8))
+        #expect(sourceAccess.activeURL(for: source.id) == relocatedURL)
+        #expect(persistedSources == [relocatedSource])
+        #expect(model.sourceState(for: source.id) == .available)
+        #expect(relocatedSkill.id == existingSkill.id)
+        #expect(relocatedSkill.directoryURL == relocatedURL.appending(path: "discovered"))
+        #expect(relocatedSkill.summary == "Updated summary.")
+        #expect(relocatedSkill.availableVersion == "2.0.0")
+        #expect(relocatedSkill.isEnabled == false)
+        #expect(model.selectedSkillIDs == [existingSkill.id])
+    }
+
+    @Test("Re-adding an unavailable directory recovers it without changing identity")
+    func readdingUnavailableSourceRecoversInPlace() async throws {
+        let source = SkillSource(
+            name: "Team Skills",
+            directoryURL: URL(filePath: "/skills/team"),
+            bookmarkData: Data("expired-bookmark".utf8)
+        )
+        let existingSkill = AgentSkill(
+            name: "Discovered Skill",
+            summary: "Old summary.",
+            installedVersion: "1.0.0",
+            availableVersion: "2.0.0",
+            directoryURL: source.directoryURL.appending(path: "discovered"),
+            sourceID: source.id,
+            relativePath: "discovered",
+            isEnabled: false
+        )
+        let store = MemorySourceStore(sources: [source])
+        let sourceAccess = DenyFirstSourceAccess()
+        let model = SkillLibraryModel(
+            sources: [source],
+            skills: [existingSkill],
+            sourceStore: store,
+            discoverer: UpdatedFixtureDiscoverer(),
+            bookmarker: RecoveryBookmarker(resolvedURL: source.directoryURL),
+            sourceAccess: sourceAccess
+        )
+        model.sidebarSelection = .source(source.id)
+        model.selectedSkillIDs = [existingSkill.id]
+
+        await model.restoreSources()
+
+        #expect(model.sourceState(for: source.id) == .unavailable)
+
+        try await model.addSource(at: URL(filePath: "/skills/other/../team"))
+
+        let recoveredSource = try #require(model.sources.first)
+        let recoveredSkill = try #require(model.skills.first)
+        let persistedSources = await store.loadSources()
+        #expect(model.sources.count == 1)
+        #expect(recoveredSource.id == source.id)
+        #expect(recoveredSource.bookmarkData == Data("/skills/team".utf8))
+        #expect(sourceAccess.activeURL(for: source.id) == source.directoryURL)
+        #expect(persistedSources == [recoveredSource])
+        #expect(model.sourceState(for: source.id) == .available)
+        #expect(recoveredSkill.id == existingSkill.id)
+        #expect(recoveredSkill.summary == "Updated summary.")
+        #expect(recoveredSkill.availableVersion == "2.0.0")
+        #expect(recoveredSkill.isEnabled == false)
+        #expect(model.selectedSkillIDs == [existingSkill.id])
+    }
+
     @Test("An unavailable directory can recover on a later rescan")
     func retriesUnavailableSource() async throws {
         let discoverer = FailOnceDiscoverer()
@@ -363,4 +471,40 @@ private final class StubSourceAccess: SkillSourceAccessing {
     }
 
     func stopAccessing(sourceID: SkillSource.ID) {}
+}
+
+@MainActor
+private final class DenyFirstSourceAccess: SkillSourceAccessing {
+    private var shouldDenyAccess = true
+    private var activeURLs: [SkillSource.ID: URL] = [:]
+
+    func beginAccessing(_ url: URL, for sourceID: SkillSource.ID) -> Bool {
+        if shouldDenyAccess {
+            shouldDenyAccess = false
+            return false
+        }
+
+        activeURLs[sourceID] = url
+        return true
+    }
+
+    func stopAccessing(sourceID: SkillSource.ID) {
+        activeURLs[sourceID] = nil
+    }
+
+    func activeURL(for sourceID: SkillSource.ID) -> URL? {
+        activeURLs[sourceID]
+    }
+}
+
+private struct RecoveryBookmarker: SkillSourceBookmarking {
+    let resolvedURL: URL
+
+    func makeBookmark(for url: URL) throws -> Data {
+        Data(url.path.utf8)
+    }
+
+    func resolveBookmark(_ data: Data) throws -> ResolvedSkillSourceBookmark {
+        ResolvedSkillSourceBookmark(url: resolvedURL, isStale: false)
+    }
 }

@@ -3,15 +3,23 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct SkillLibraryView: View {
+    private enum DirectoryImportPurpose {
+        case add
+        case relocate(SkillSource.ID)
+    }
+
     @Bindable var model: SkillLibraryModel
     @State private var isChoosingDirectory = false
+    @State private var directoryImportPurpose = DirectoryImportPurpose.add
 
     var body: some View {
         NavigationSplitView {
-            SkillSourceSidebar(model: model)
+            SkillSourceSidebar(model: model) { sourceID in
+                chooseDirectory(for: .relocate(sourceID))
+            }
         } content: {
             SkillList(model: model) {
-                isChoosingDirectory = true
+                chooseDirectory(for: .add)
             }
         } detail: {
             SkillDetail(model: model)
@@ -49,14 +57,14 @@ struct SkillLibraryView: View {
     private var addDirectoryButton: some View {
         if #available(macOS 26.0, *) {
             Button("Add Directory", systemImage: "plus") {
-                isChoosingDirectory = true
+                chooseDirectory(for: .add)
             }
             .buttonStyle(.glassProminent)
             .labelStyle(.titleAndIcon)
             .help("Add a directory that contains agent skills")
         } else {
             Button("Add Directory", systemImage: "plus") {
-                isChoosingDirectory = true
+                chooseDirectory(for: .add)
             }
             .buttonStyle(.borderedProminent)
             .labelStyle(.titleAndIcon)
@@ -64,16 +72,35 @@ struct SkillLibraryView: View {
         }
     }
 
+    private func chooseDirectory(for purpose: DirectoryImportPurpose) {
+        directoryImportPurpose = purpose
+        isChoosingDirectory = true
+    }
+
     private func handleDirectoryImport(_ result: Result<[URL], any Error>) {
+        let purpose = directoryImportPurpose
+
         Task { @MainActor in
             do {
                 guard let directoryURL = try result.get().first else {
                     return
                 }
 
-                try await model.addSource(at: directoryURL)
+                switch purpose {
+                case .add:
+                    try await model.addSource(at: directoryURL)
+                case .relocate(let sourceID):
+                    try await model.relocateSource(sourceID, to: directoryURL)
+                }
             } catch {
-                model.report(error, title: "Unable to Add Directory")
+                let title =
+                    switch purpose {
+                    case .add:
+                        "Unable to Add Directory"
+                    case .relocate:
+                        "Unable to Relocate Directory"
+                    }
+                model.report(error, title: title)
             }
         }
     }

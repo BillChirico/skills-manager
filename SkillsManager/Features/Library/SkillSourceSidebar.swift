@@ -4,6 +4,7 @@ import SwiftUI
 
 struct SkillSourceSidebar: View {
     @Bindable var model: SkillLibraryModel
+    let relocateSource: (SkillSource.ID) -> Void
     @State private var sourceBeingRenamed: SkillSource?
     @State private var sourceBeingRemoved: SkillSource?
     @State private var renamedSourceName = ""
@@ -178,6 +179,12 @@ struct SkillSourceSidebar: View {
 
     @ViewBuilder
     private func sourceContextMenu(_ source: SkillSource) -> some View {
+        if model.sourceState(for: source.id) == .unavailable {
+            Button("Relocate…", systemImage: "folder") {
+                relocateSource(source.id)
+            }
+        }
+
         Button("Rescan", systemImage: "arrow.clockwise") {
             perform("Unable to Scan \(source.displayName)") {
                 try await model.rescanSource(source.id)

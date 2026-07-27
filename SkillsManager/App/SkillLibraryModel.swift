@@ -17,6 +17,14 @@ final class SkillLibraryModel {
         let message: String
     }
 
+    private enum SourceRecoveryError: LocalizedError {
+        case accessDenied
+
+        var errorDescription: String? {
+            "Skills Manager could not access the selected directory."
+        }
+    }
+
     private(set) var sources: [SkillSource]
     private(set) var skills: [AgentSkill]
     private(set) var sourceStates: [SkillSource.ID: SourceState]
@@ -209,6 +217,9 @@ final class SkillLibraryModel {
             $0.directoryURL.standardizedFileURL == normalizedURL
         }) {
             sidebarSelection = .source(existingSource.id)
+            if sourceState(for: existingSource.id) == .unavailable {
+                try await recoverSource(existingSource.id, at: normalizedURL)
+            }
             return
         }
 
@@ -245,6 +256,10 @@ final class SkillLibraryModel {
                 )
             }
         }
+    }
+
+    func relocateSource(_ sourceID: SkillSource.ID, to directoryURL: URL) async throws {
+        try await recoverSource(sourceID, at: directoryURL.standardizedFileURL)
     }
 
     func renameSource(_ sourceID: SkillSource.ID, to name: String) async throws {
@@ -408,6 +423,70 @@ final class SkillLibraryModel {
 
     private func persistSources() async throws {
         try await sourceStore?.save(sources)
+    }
+
+    private func recoverSource(
+        _ sourceID: SkillSource.ID,
+        at directoryURL: URL
+    ) async throws {
+        guard let sourceIndex = sources.firstIndex(where: { $0.id == sourceID }) else {
+            return
+        }
+
+        let previousSource = sources[sourceIndex]
+        let previousState = sourceStates[sourceID]
+        let bookmarkData = try bookmarker?.makeBookmark(for: directoryURL)
+        let accessGranted =
+            sourceAccess?.beginAccessing(directoryURL, for: sourceID) ?? true
+
+        guard accessGranted else {
+            if previousState == .available,
+                sourceAccess?.beginAccessing(previousSource.directoryURL, for: sourceID) == true
+            {
+                sourceStates[sourceID] = .available
+            } else {
+                sourceStates[sourceID] = .unavailable
+            }
+            throw SourceRecoveryError.accessDenied
+        }
+
+        sources[sourceIndex].directoryURL = directoryURL
+        sources[sourceIndex].bookmarkData = bookmarkData
+        sources = Self.sortedSources(sources)
+        sourceStates[sourceID] = .available
+
+        do {
+            try await persistSources()
+        } catch {
+            guard let rollbackIndex = sources.firstIndex(where: { $0.id == sourceID }) else {
+                throw error
+            }
+            sources[rollbackIndex] = previousSource
+            sources = Self.sortedSources(sources)
+
+            if previousState == .available {
+                let restoredAccess =
+                    sourceAccess?.beginAccessing(previousSource.directoryURL, for: sourceID)
+                sourceStates[sourceID] = restoredAccess == false ? .unavailable : previousState
+            } else {
+                sourceAccess?.stopAccessing(sourceID: sourceID)
+                sourceStates[sourceID] = previousState
+            }
+            throw error
+        }
+
+        guard previousSource.isEnabled, discoverer != nil else {
+            return
+        }
+
+        do {
+            try await rescanSource(sourceID)
+        } catch {
+            report(
+                error,
+                title: "Unable to Scan \(previousSource.displayName)"
+            )
+        }
     }
 
     private func reconcileSelection() {
