@@ -45,6 +45,8 @@ hand-off when full Xcode is available. If Xcode is unavailable, run
 - Keep filesystem, network, persistence, and time dependencies injectable.
 - Never add AppKit or SwiftUI imports to `SkillsCore`.
 - Use native SwiftUI controls and semantic colors before custom drawing.
+- Inherit the user's macOS accent color. Do not add a global `AccentColor`
+  asset or override the root scene's tint.
 - Gate macOS 26-only Liquid Glass APIs with availability checks and retain a
   usable fallback for macOS 15 through 25.
 - Treat accessibility labels, keyboard access, empty states, and reduced motion
