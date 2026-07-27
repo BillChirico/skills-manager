@@ -253,8 +253,13 @@ struct SkillLibraryModelTests {
         #expect(model.selectedSkillIDs == [existingSkill.id])
     }
 
-    @Test("Relocating an unavailable directory preserves source and skill identity")
-    func relocatingUnavailableSourceRecoversInPlace() async throws {
+    @Test(
+        "Relocating an unavailable directory preserves source and skill identity",
+        arguments: SourceRestoreFailure.allCases
+    )
+    func relocatingUnavailableSourceRecoversInPlace(
+        after restoreFailure: SourceRestoreFailure
+    ) async throws {
         let source = SkillSource(
             name: "Team Skills",
             directoryURL: URL(filePath: "/skills/old-team"),
@@ -271,13 +276,24 @@ struct SkillLibraryModelTests {
             isEnabled: false
         )
         let store = MemorySourceStore(sources: [source])
-        let sourceAccess = DenyFirstSourceAccess()
+        let sourceAccess: RecordingSourceAccess
+        let bookmarker: any SkillSourceBookmarking
+
+        switch restoreFailure {
+        case .bookmarkResolution:
+            sourceAccess = RecordingSourceAccess()
+            bookmarker = FailingResolveBookmarker()
+        case .securityScopeAccess:
+            sourceAccess = RecordingSourceAccess(accessResults: [false, true])
+            bookmarker = RecoveryBookmarker(resolvedURL: source.directoryURL)
+        }
+
         let model = SkillLibraryModel(
             sources: [source],
             skills: [existingSkill],
             sourceStore: store,
             discoverer: UpdatedFixtureDiscoverer(),
-            bookmarker: RecoveryBookmarker(resolvedURL: source.directoryURL),
+            bookmarker: bookmarker,
             sourceAccess: sourceAccess
         )
         model.sidebarSelection = .source(source.id)
@@ -309,6 +325,50 @@ struct SkillLibraryModelTests {
         #expect(model.selectedSkillIDs == [existingSkill.id])
     }
 
+    @Test("Denied directory recovery leaves the source and its skills unchanged")
+    func deniedSourceRecoveryIsNonDestructive() async throws {
+        let source = SkillSource(
+            name: "Team Skills",
+            directoryURL: URL(filePath: "/skills/team"),
+            bookmarkData: Data("expired-bookmark".utf8)
+        )
+        let existingSkill = AgentSkill(
+            name: "Discovered Skill",
+            summary: "Old summary.",
+            installedVersion: "1.0.0",
+            availableVersion: "2.0.0",
+            directoryURL: source.directoryURL.appending(path: "discovered"),
+            sourceID: source.id,
+            relativePath: "discovered",
+            isEnabled: false
+        )
+        let store = MemorySourceStore(sources: [source])
+        let sourceAccess = RecordingSourceAccess(accessResults: [false, false])
+        let model = SkillLibraryModel(
+            sources: [source],
+            skills: [existingSkill],
+            sourceStore: store,
+            discoverer: UpdatedFixtureDiscoverer(),
+            bookmarker: RecoveryBookmarker(resolvedURL: source.directoryURL),
+            sourceAccess: sourceAccess
+        )
+
+        await model.restoreSources()
+
+        await #expect(throws: SkillLibraryModel.SourceRecoveryError.accessDenied) {
+            try await model.relocateSource(
+                source.id,
+                to: URL(filePath: "/skills/relocated/team")
+            )
+        }
+
+        #expect(model.sources == [source])
+        #expect(model.skills == [existingSkill])
+        #expect(await store.loadSources() == [source])
+        #expect(model.sourceState(for: source.id) == .unavailable)
+        #expect(sourceAccess.activeURL(for: source.id) == nil)
+    }
+
     @Test("Re-adding an unavailable directory recovers it without changing identity")
     func readdingUnavailableSourceRecoversInPlace() async throws {
         let source = SkillSource(
@@ -327,7 +387,7 @@ struct SkillLibraryModelTests {
             isEnabled: false
         )
         let store = MemorySourceStore(sources: [source])
-        let sourceAccess = DenyFirstSourceAccess()
+        let sourceAccess = RecordingSourceAccess(accessResults: [false, true])
         let model = SkillLibraryModel(
             sources: [source],
             skills: [existingSkill],
@@ -430,6 +490,11 @@ struct SkillLibraryModelTests {
             sourceAccess: StubSourceAccess()
         )
     }
+}
+
+enum SourceRestoreFailure: CaseIterable, Sendable {
+    case bookmarkResolution
+    case securityScopeAccess
 }
 
 private actor MemorySourceStore: SkillSourceStore {
@@ -549,13 +614,19 @@ private final class StubSourceAccess: SkillSourceAccessing {
 }
 
 @MainActor
-private final class DenyFirstSourceAccess: SkillSourceAccessing {
-    private var shouldDenyAccess = true
+private final class RecordingSourceAccess: SkillSourceAccessing {
+    private var accessResults: [Bool]
     private var activeURLs: [SkillSource.ID: URL] = [:]
 
+    init(accessResults: [Bool] = []) {
+        self.accessResults = accessResults
+    }
+
     func beginAccessing(_ url: URL, for sourceID: SkillSource.ID) -> Bool {
-        if shouldDenyAccess {
-            shouldDenyAccess = false
+        activeURLs[sourceID] = nil
+        let accessGranted = accessResults.isEmpty ? true : accessResults.removeFirst()
+
+        guard accessGranted else {
             return false
         }
 
@@ -569,6 +640,18 @@ private final class DenyFirstSourceAccess: SkillSourceAccessing {
 
     func activeURL(for sourceID: SkillSource.ID) -> URL? {
         activeURLs[sourceID]
+    }
+}
+
+private struct FailingResolveBookmarker: SkillSourceBookmarking {
+    struct ResolutionError: Error {}
+
+    func makeBookmark(for url: URL) throws -> Data {
+        Data(url.path.utf8)
+    }
+
+    func resolveBookmark(_ data: Data) throws -> ResolvedSkillSourceBookmark {
+        throw ResolutionError()
     }
 }
 
