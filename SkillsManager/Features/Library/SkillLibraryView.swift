@@ -43,6 +43,9 @@ struct SkillLibraryView: View {
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 discoverButton
+                Color.clear
+                    .frame(width: 12)
+                    .accessibilityHidden(true)
                 addDirectoryButton
             }
 
