@@ -49,13 +49,9 @@ public enum SkillAgent: String, CaseIterable, Codable, Identifiable, Sendable {
             return nil
         }
 
-        return relativePath.split(separator: "/").reduce(
-            homeDirectory.standardizedFileURL
-        ) { directoryURL, component in
-            directoryURL.appending(
-                path: String(component),
-                directoryHint: .isDirectory
-            )
-        }
+        return homeDirectory.standardizedFileURL.appending(
+            path: relativePath,
+            directoryHint: .isDirectory
+        )
     }
 }
