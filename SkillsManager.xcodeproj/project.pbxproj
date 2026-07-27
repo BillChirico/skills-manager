@@ -1,0 +1,588 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		02175322C2007528697F5AE3 /* GlassPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F32267ADF6DE133229BEE84 /* GlassPanel.swift */; };
+		21D6A6770E2DD650E15DB662 /* SkillLibraryModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A6FD9583210F461B8C10058 /* SkillLibraryModelTests.swift */; };
+		2678B79191361B36FBEE9437 /* SkillLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D215E0EA89D2A7E8FD5C62D6 /* SkillLibraryView.swift */; };
+		3D07750A323450A9DDD445DF /* SkillsManagerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4816B3E9012AB1F4A53BEE77 /* SkillsManagerApp.swift */; };
+		7D8580E826C0150748097DF1 /* SkillList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 967846C50FEAD77DB44AC053 /* SkillList.swift */; };
+		81712A7A5CC04311C93C9225 /* SkillSourceSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A4E285DCEC62A32FE2BCFD8 /* SkillSourceSidebar.swift */; };
+		969AE94BB0DE1FD72398A99D /* SkillsCore in Frameworks */ = {isa = PBXBuildFile; productRef = 3380F0FCA4019E2DFC6388F0 /* SkillsCore */; };
+		A054C71A0EC9029586CD2F55 /* SkillLibraryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28D3397F722CA129DBB67F0A /* SkillLibraryModel.swift */; };
+		CA29195A1FF04878D57D9EE5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D298670C70296E0E9836ADF9 /* Assets.xcassets */; };
+		D5156E96647BF72A903EAA2B /* SkillDetail.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798333DD8A836A78860F88DF /* SkillDetail.swift */; };
+		F7233070FC6391CCC26991DE /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E95C035BE8E05F56821929B1 /* SettingsView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		80C15A78557D5E19468625DC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E5CBF98AC0D7298B8F780F9F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0B9641116DC5DB74BA44F450;
+			remoteInfo = SkillsManager;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		1F32267ADF6DE133229BEE84 /* GlassPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassPanel.swift; sourceTree = "<group>"; };
+		2104245FFF577B2FF9088F8A /* CLAUDE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = CLAUDE.md; sourceTree = "<group>"; };
+		28D3397F722CA129DBB67F0A /* SkillLibraryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryModel.swift; sourceTree = "<group>"; };
+		3EC9162967D67E2AA7841E22 /* SkillsManagerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SkillsManagerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		45D33B62086982B7ED9100D8 /* AGENTS.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = AGENTS.md; sourceTree = "<group>"; };
+		4816B3E9012AB1F4A53BEE77 /* SkillsManagerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillsManagerApp.swift; sourceTree = "<group>"; };
+		6A4E285DCEC62A32FE2BCFD8 /* SkillSourceSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillSourceSidebar.swift; sourceTree = "<group>"; };
+		71E86521947227FAD14E43AA /* SkillsManager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SkillsManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		798333DD8A836A78860F88DF /* SkillDetail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillDetail.swift; sourceTree = "<group>"; };
+		8A6FD9583210F461B8C10058 /* SkillLibraryModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryModelTests.swift; sourceTree = "<group>"; };
+		9012D9D210AEF08DCBE01777 /* ARCHITECTURE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ARCHITECTURE.md; sourceTree = "<group>"; };
+		967846C50FEAD77DB44AC053 /* SkillList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillList.swift; sourceTree = "<group>"; };
+		9D8C677DEC993CE4CF7548D8 /* SkillsManager.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SkillsManager.entitlements; sourceTree = "<group>"; };
+		D0EED475D6F3CC38D0FCFFD2 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		D215E0EA89D2A7E8FD5C62D6 /* SkillLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryView.swift; sourceTree = "<group>"; };
+		D298670C70296E0E9836ADF9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		E95C035BE8E05F56821929B1 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		FC8D81DE9B146956C34EDC28 /* SkillsCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SkillsCore; path = Packages/SkillsCore; sourceTree = SOURCE_ROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		F1F26C6090A107D847572378 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				969AE94BB0DE1FD72398A99D /* SkillsCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1CAD9EE44874A4855199C874 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				E95C035BE8E05F56821929B1 /* SettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		1DA63D6B242CD7B694E54A40 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				FC8D81DE9B146956C34EDC28 /* SkillsCore */,
+			);
+			path = Packages;
+			sourceTree = "<group>";
+		};
+		37F149A4B015DBBCBBA5C67E /* App */ = {
+			isa = PBXGroup;
+			children = (
+				8A6FD9583210F461B8C10058 /* SkillLibraryModelTests.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		406E8532F5BB702320DC1BFF /* SkillsManagerTests */ = {
+			isa = PBXGroup;
+			children = (
+				37F149A4B015DBBCBBA5C67E /* App */,
+			);
+			path = SkillsManagerTests;
+			sourceTree = "<group>";
+		};
+		4393B119C7A4DAF93940DECA /* VisualStyle */ = {
+			isa = PBXGroup;
+			children = (
+				1F32267ADF6DE133229BEE84 /* GlassPanel.swift */,
+			);
+			path = VisualStyle;
+			sourceTree = "<group>";
+		};
+		4727D79027C1160163627C15 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				28D3397F722CA129DBB67F0A /* SkillLibraryModel.swift */,
+				4816B3E9012AB1F4A53BEE77 /* SkillsManagerApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		4934C2365AFB2ED46B1B1198 /* Support */ = {
+			isa = PBXGroup;
+			children = (
+				9D8C677DEC993CE4CF7548D8 /* SkillsManager.entitlements */,
+			);
+			path = Support;
+			sourceTree = "<group>";
+		};
+		5C94095DE9797BF54E86650C /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				406E8532F5BB702320DC1BFF /* SkillsManagerTests */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		6757C74A23E44B01D6CE300B /* docs */ = {
+			isa = PBXGroup;
+			children = (
+				9012D9D210AEF08DCBE01777 /* ARCHITECTURE.md */,
+			);
+			path = docs;
+			sourceTree = "<group>";
+		};
+		7124B9408E0A79723DEAD68C /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				D298670C70296E0E9836ADF9 /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		94DF0A2408CB4C02531EE436 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				AE3A130C602DCEB7DFE13AAA /* Library */,
+				1CAD9EE44874A4855199C874 /* Settings */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		9AA84F2246F4627905E1788F /* SkillsManager */ = {
+			isa = PBXGroup;
+			children = (
+				4727D79027C1160163627C15 /* App */,
+				94DF0A2408CB4C02531EE436 /* Features */,
+				7124B9408E0A79723DEAD68C /* Resources */,
+				E1379E1E9C652484CDE293AF /* Shared */,
+				4934C2365AFB2ED46B1B1198 /* Support */,
+			);
+			path = SkillsManager;
+			sourceTree = "<group>";
+		};
+		AE3A130C602DCEB7DFE13AAA /* Library */ = {
+			isa = PBXGroup;
+			children = (
+				798333DD8A836A78860F88DF /* SkillDetail.swift */,
+				D215E0EA89D2A7E8FD5C62D6 /* SkillLibraryView.swift */,
+				967846C50FEAD77DB44AC053 /* SkillList.swift */,
+				6A4E285DCEC62A32FE2BCFD8 /* SkillSourceSidebar.swift */,
+			);
+			path = Library;
+			sourceTree = "<group>";
+		};
+		CC56A8FD91FC65855EEC6C19 = {
+			isa = PBXGroup;
+			children = (
+				45D33B62086982B7ED9100D8 /* AGENTS.md */,
+				2104245FFF577B2FF9088F8A /* CLAUDE.md */,
+				D0EED475D6F3CC38D0FCFFD2 /* README.md */,
+				6757C74A23E44B01D6CE300B /* docs */,
+				1DA63D6B242CD7B694E54A40 /* Packages */,
+				9AA84F2246F4627905E1788F /* SkillsManager */,
+				5C94095DE9797BF54E86650C /* Tests */,
+				E3C5A2C60A157CCF5CCA5040 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		E1379E1E9C652484CDE293AF /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				4393B119C7A4DAF93940DECA /* VisualStyle */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		E3C5A2C60A157CCF5CCA5040 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				71E86521947227FAD14E43AA /* SkillsManager.app */,
+				3EC9162967D67E2AA7841E22 /* SkillsManagerTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0B9641116DC5DB74BA44F450 /* SkillsManager */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA3F91DAA7A57F1557877A0A /* Build configuration list for PBXNativeTarget "SkillsManager" */;
+			buildPhases = (
+				EBD5C1F8924037C4641C5AA3 /* Sources */,
+				0FD8CE056109E6AE6852C647 /* Resources */,
+				F1F26C6090A107D847572378 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SkillsManager;
+			packageProductDependencies = (
+				3380F0FCA4019E2DFC6388F0 /* SkillsCore */,
+			);
+			productName = SkillsManager;
+			productReference = 71E86521947227FAD14E43AA /* SkillsManager.app */;
+			productType = "com.apple.product-type.application";
+		};
+		8AE64A2B7A9ACF56D50FCCDD /* SkillsManagerTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 29E91045245D25E23CBF097A /* Build configuration list for PBXNativeTarget "SkillsManagerTests" */;
+			buildPhases = (
+				1850220BE2DBC8A4868E2031 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				557B9EDAC35A145D72043F98 /* PBXTargetDependency */,
+			);
+			name = SkillsManagerTests;
+			packageProductDependencies = (
+			);
+			productName = SkillsManagerTests;
+			productReference = 3EC9162967D67E2AA7841E22 /* SkillsManagerTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		E5CBF98AC0D7298B8F780F9F /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					0B9641116DC5DB74BA44F450 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 57F5CAACB64A67FD636FBB3F /* Build configuration list for PBXProject "SkillsManager" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = CC56A8FD91FC65855EEC6C19;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				C7D0193BA6D71D6E5F705382 /* XCLocalSwiftPackageReference "Packages/SkillsCore" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = E3C5A2C60A157CCF5CCA5040 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				0B9641116DC5DB74BA44F450 /* SkillsManager */,
+				8AE64A2B7A9ACF56D50FCCDD /* SkillsManagerTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		0FD8CE056109E6AE6852C647 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CA29195A1FF04878D57D9EE5 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1850220BE2DBC8A4868E2031 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				21D6A6770E2DD650E15DB662 /* SkillLibraryModelTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EBD5C1F8924037C4641C5AA3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				02175322C2007528697F5AE3 /* GlassPanel.swift in Sources */,
+				F7233070FC6391CCC26991DE /* SettingsView.swift in Sources */,
+				D5156E96647BF72A903EAA2B /* SkillDetail.swift in Sources */,
+				A054C71A0EC9029586CD2F55 /* SkillLibraryModel.swift in Sources */,
+				2678B79191361B36FBEE9437 /* SkillLibraryView.swift in Sources */,
+				7D8580E826C0150748097DF1 /* SkillList.swift in Sources */,
+				81712A7A5CC04311C93C9225 /* SkillSourceSidebar.swift in Sources */,
+				3D07750A323450A9DDD445DF /* SkillsManagerApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		557B9EDAC35A145D72043F98 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 0B9641116DC5DB74BA44F450 /* SkillsManager */;
+			targetProxy = 80C15A78557D5E19468625DC /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		78622F85F1229F54860A496D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = SkillsManager/Support/SkillsManager.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Skills Manager";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Volvox. All rights reserved.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.volvox.SkillsManager;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		86590914979EA9A6F8013CB2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.volvox.SkillsManagerTests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SkillsManager.app/Contents/MacOS/SkillsManager";
+			};
+			name = Debug;
+		};
+		897117DC70EA9BF1A22DB77F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		93BAE42A455EF4BBCEAB5776 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.volvox.SkillsManagerTests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SkillsManager.app/Contents/MacOS/SkillsManager";
+			};
+			name = Release;
+		};
+		BBC41EA88573B66C1D91F68D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		F5BC80E2C0C50174CBCA8FFF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = SkillsManager/Support/SkillsManager.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Skills Manager";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Volvox. All rights reserved.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.volvox.SkillsManager;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		29E91045245D25E23CBF097A /* Build configuration list for PBXNativeTarget "SkillsManagerTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				86590914979EA9A6F8013CB2 /* Debug */,
+				93BAE42A455EF4BBCEAB5776 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		57F5CAACB64A67FD636FBB3F /* Build configuration list for PBXProject "SkillsManager" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				897117DC70EA9BF1A22DB77F /* Debug */,
+				BBC41EA88573B66C1D91F68D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		AA3F91DAA7A57F1557877A0A /* Build configuration list for PBXNativeTarget "SkillsManager" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F5BC80E2C0C50174CBCA8FFF /* Debug */,
+				78622F85F1229F54860A496D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		C7D0193BA6D71D6E5F705382 /* XCLocalSwiftPackageReference "Packages/SkillsCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/SkillsCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		3380F0FCA4019E2DFC6388F0 /* SkillsCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SkillsCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = E5CBF98AC0D7298B8F780F9F /* Project object */;
+}
