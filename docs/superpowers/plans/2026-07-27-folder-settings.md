@@ -36,14 +36,14 @@ unchanged. Move only picker ownership and add/remove presentation into
 - Produces: `FolderSettingsSelection.sourceID` and
   `mutating func reconcile(with sources: [SkillSource])`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create two Swift Testing cases. The first starts with the second of two sources
 selected and asserts reconciliation preserves it. The second starts with a
 removed source selected, asserts reconciliation selects the first remaining
 source, then asserts reconciling an empty list clears selection.
 
-- [ ] **Step 2: Run the focused app test**
+- [x] **Step 2: Run the focused app test**
 
 Run:
 
@@ -56,21 +56,22 @@ xcodebuild -project SkillsManager.xcodeproj -scheme SkillsManager \
 Expected before implementation: compilation fails because
 `FolderSettingsSelection` does not exist.
 
-- [ ] **Step 3: Add the minimal selection value**
+- [x] **Step 3: Add the minimal selection value**
 
 Add an internal `FolderSettingsSelection` value to `SettingsView.swift`. Its
 `reconcile(with:)` method keeps an existing selected ID, otherwise assigns the
 first source ID, or assigns `nil` when no sources remain.
 
-- [ ] **Step 4: Run the focused test again**
+- [x] **Step 4: Run the focused test again**
 
 Run the same `xcodebuild` command. Expected: both selection tests pass.
 
-- [ ] **Step 5: Commit the behavior lock**
+- [x] **Step 5: Commit the behavior lock**
 
 ```sh
 git add Tests/SkillsManagerTests/Settings/FolderSettingsSelectionTests.swift \
-  SkillsManager/Features/Settings/SettingsView.swift
+  SkillsManager/Features/Settings/SettingsView.swift \
+  SkillsManager.xcodeproj/project.pbxproj
 git commit -m "test: drive folder settings selection"
 ```
 
@@ -88,40 +89,40 @@ git commit -m "test: drive folder settings selection"
   Settings-owned directory importer, plus/minus controls, and Settings links
   from the toolbar and empty states.
 
-- [ ] **Step 1: Reduce the library picker to relocation**
+- [x] **Step 1: Reduce the library picker to relocation**
 
 Remove the add-purpose state and Add Directory toolbar menu from
 `SkillLibraryView`. Keep `.fileImporter` for
 `relocateSource(_:to:)`. Promote the existing `SettingsLink` to the
 `.primaryAction` toolbar placement and retain `gearshape`.
 
-- [ ] **Step 2: Route empty states to Settings**
+- [x] **Step 2: Route empty states to Settings**
 
 Remove `SkillList.addDirectory` and replace `.addDirectory` empty-state actions
 with a `SettingsLink` labeled "Manage Folders". Keep rescan and search actions
 unchanged.
 
-- [ ] **Step 3: Build the Settings folder panel**
+- [x] **Step 3: Build the Settings folder panel**
 
 In `SettingsView`, use `FolderSettingsSelection` and add picker state, selected
 agent, default picker URL, and pending-removal state. Render all `model.sources`
 in a selectable list with folder name, agent, path, enabled opacity, and
 available/scanning/unavailable status.
 
-- [ ] **Step 4: Add native plus/minus behavior**
+- [x] **Step 4: Add native plus/minus behavior**
 
 Place the agent directory `Menu` and a disabled-until-selected minus `Button` in
 the list footer. The plus menu opens the directory importer; the minus button
 opens a destructive confirmation whose message explicitly says files remain on
 disk.
 
-- [ ] **Step 5: Preserve error and restore paths**
+- [x] **Step 5: Preserve error and restore paths**
 
 Call `model.restoreSources()` from a Settings task, handle picker cancellation
 without mutation, report add/remove errors through `model.report`, and attach
 the existing model error alert to Settings.
 
-- [ ] **Step 6: Format and compile**
+- [x] **Step 6: Format and compile**
 
 Run:
 
@@ -136,13 +137,12 @@ make app-test
 
 Expected: formatting and lint pass, then all app tests pass.
 
-- [ ] **Step 7: Commit the UI migration**
+- [x] **Step 7: Commit the UI migration**
 
 ```sh
 git add SkillsManager/Features/Settings/SettingsView.swift \
   SkillsManager/Features/Library/SkillLibraryView.swift \
-  SkillsManager/Features/Library/SkillList.swift \
-  SkillsManager.xcodeproj/project.pbxproj
+  SkillsManager/Features/Library/SkillList.swift
 git commit -m "feat: manage folders from settings"
 ```
 
@@ -161,20 +161,20 @@ git commit -m "feat: manage folders from settings"
 - Produces: current user instructions and a contributor contract that keeps
   folder addition in Settings.
 
-- [ ] **Step 1: Update user-facing documentation**
+- [x] **Step 1: Update user-facing documentation**
 
 Describe the Settings folder list, plus/minus controls, agent-aware picker menu,
 and toolbar Settings entry. Remove wording that locates Add Directory in the
 library.
 
-- [ ] **Step 2: Update architecture and agent guidance**
+- [x] **Step 2: Update architecture and agent guidance**
 
 Document that Settings owns add/remove presentation while
 `SkillLibraryModel` owns source mutations. Add a contributor rule that future
 folder-entry UI remains centralized in Settings without bypassing security
 scope or bookmark creation.
 
-- [ ] **Step 3: Scan docs for stale copy**
+- [x] **Step 3: Scan docs for stale copy**
 
 Run:
 
@@ -185,7 +185,7 @@ rg -n "Add Directory|add menu|Library window" README.md docs AGENTS.md CLAUDE.md
 Expected: no stale claim says the library toolbar or empty state adds folders
 directly.
 
-- [ ] **Step 4: Commit documentation**
+- [x] **Step 4: Commit documentation**
 
 ```sh
 git add README.md docs/ARCHITECTURE.md AGENTS.md docs/superpowers

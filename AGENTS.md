@@ -49,6 +49,12 @@ hand-off when full Xcode is available. If Xcode is unavailable, run
   usable fallback for macOS 15 through 25.
 - Treat accessibility labels, keyboard access, empty states, and reduced motion
   as part of feature completion.
+- Keep folder addition and the primary add/remove list in Settings. Route other
+  entry points to the Settings scene instead of duplicating the folder picker;
+  contextual relocation for unavailable sources may remain in the library.
+- Send every folder add, relocate, or remove mutation through
+  `SkillLibraryModel` so security-scoped access, bookmarks, persistence, and
+  rollback remain intact.
 
 ## Testing conventions
 

@@ -33,7 +33,11 @@ separate catalog model coordinates debounced skills.sh searches and
 installations so network and filesystem work remain independently testable.
 Agent models expose their standard user skill-directory paths, which the app
 uses as picker starting points without bypassing the sandbox’s user-consent
-boundary.
+boundary. `SettingsView` owns folder-add and folder-remove presentation,
+including the agent-aware picker menu, list selection, and destructive
+confirmation. The library routes its toolbar and empty states to the Settings
+scene; contextual relocation remains in the library for unavailable sources.
+All mutations still pass through `SkillLibraryModel`.
 
 ## Domain layer
 
