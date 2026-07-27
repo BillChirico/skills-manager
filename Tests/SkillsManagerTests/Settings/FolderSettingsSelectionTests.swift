@@ -17,17 +17,23 @@ struct FolderSettingsSelectionTests {
         #expect(selection.sourceID == second.id)
     }
 
-    @Test("Reconciliation selects a remaining folder and clears an empty list")
-    func selectsRemainingSourceThenClearsEmptyList() {
+    @Test("Reconciliation keeps a populated folder list unselected")
+    func keepsPopulatedListUnselected() {
+        let source = makeSource(name: "Codex", path: "/skills/codex")
+        var selection = FolderSettingsSelection()
+
+        selection.reconcile(with: [source])
+
+        #expect(selection.sourceID == nil)
+    }
+
+    @Test("Reconciliation clears a selection when its folder disappears")
+    func clearsRemovedSelection() {
         let removed = makeSource(name: "Claude", path: "/skills/claude")
         let remaining = makeSource(name: "Codex", path: "/skills/codex")
         var selection = FolderSettingsSelection(sourceID: removed.id)
 
         selection.reconcile(with: [remaining])
-
-        #expect(selection.sourceID == remaining.id)
-
-        selection.reconcile(with: [])
 
         #expect(selection.sourceID == nil)
     }

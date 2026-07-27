@@ -281,12 +281,12 @@ struct FolderSettingsSelection {
     var sourceID: SkillSource.ID?
 
     mutating func reconcile(with sources: [SkillSource]) {
-        guard
-            let sourceID,
-            sources.contains(where: { $0.id == sourceID })
-        else {
-            sourceID = sources.first?.id
+        guard let sourceID else {
             return
+        }
+
+        if sources.contains(where: { $0.id == sourceID }) == false {
+            self.sourceID = nil
         }
     }
 }
