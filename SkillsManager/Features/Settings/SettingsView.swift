@@ -4,45 +4,57 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct SettingsView: View {
+    private static let catalogURL: URL = {
+        guard let url = URL(string: "https://skills.sh") else {
+            preconditionFailure("The skills.sh catalog URL must be valid.")
+        }
+        return url
+    }()
+
     @Bindable var model: SkillLibraryModel
     @State private var folderSelection = FolderSettingsSelection()
     @State private var isChoosingFolder = false
     @State private var newFolderAgent = SkillAgent.other
     @State private var folderDialogDefaultDirectory: URL?
+    @State private var sourceBeingReconnected: SkillSource.ID?
     @State private var sourceBeingRemoved: SkillSource?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: SkillsManagerSpacing.extraLarge) {
-            VStack(alignment: .leading, spacing: SkillsManagerSpacing.small) {
+        Form {
+            Section {
+                folderPanel
+            } header: {
                 Text("Skill Folders")
-                    .font(.title2.weight(.semibold))
-
+            } footer: {
                 Text(
                     "Choose the folders Skills Manager scans. Removing a folder here never deletes its files."
                 )
-                .foregroundStyle(.secondary)
             }
 
-            folderPanel
-
-            VStack(alignment: .leading, spacing: SkillsManagerSpacing.medium) {
-                Text("Discovery")
-                    .font(.headline)
-
+            Section {
                 LabeledContent("Catalog") {
-                    Text("skills.sh")
-                        .foregroundStyle(.secondary)
+                    Link(destination: Self.catalogURL) {
+                        Label("skills.sh", systemImage: "arrow.up.right.square")
+                            .labelStyle(.titleAndIcon)
+                    }
                 }
-
+            } header: {
+                Text("Discovery")
+            } footer: {
                 Text(
                     "Search skills.sh and install into any enabled agent folder."
                 )
-                .font(.callout)
-                .foregroundStyle(.secondary)
             }
         }
-        .padding(SkillsManagerSpacing.extraExtraLarge)
-        .frame(width: 640, height: 520)
+        .formStyle(.grouped)
+        .frame(
+            minWidth: 620,
+            idealWidth: 680,
+            maxWidth: .infinity,
+            minHeight: 480,
+            idealHeight: 560,
+            maxHeight: .infinity
+        )
         .fileImporter(
             isPresented: $isChoosingFolder,
             allowedContentTypes: [.directory],
@@ -100,11 +112,13 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             Group {
                 if model.sources.isEmpty {
-                    ContentUnavailableView(
-                        "No Skill Folders",
-                        systemImage: "folder",
-                        description: Text("Use the add button below to choose a folder.")
-                    )
+                    ContentUnavailableView {
+                        Label("No Skill Folders", systemImage: "folder")
+                    } description: {
+                        Text("Add a folder that contains an agent’s skills.")
+                    } actions: {
+                        emptyStateAddFolderMenu
+                    }
                 } else {
                     List(model.sources, selection: $folderSelection.sourceID) { source in
                         folderRow(source)
@@ -114,24 +128,15 @@ struct SettingsView: View {
                     .scrollContentBackground(.hidden)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 220)
+            .frame(maxWidth: .infinity, minHeight: 280)
 
-            Divider()
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor))
+                .frame(height: 1)
+                .accessibilityHidden(true)
 
             HStack {
-                ControlGroup {
-                    addFolderMenu
-
-                    Button {
-                        sourceBeingRemoved = selectedSource
-                    } label: {
-                        Label("Remove Selected Folder", systemImage: "minus")
-                            .labelStyle(.iconOnly)
-                    }
-                    .disabled(selectedSource == nil)
-                    .help("Remove the selected folder from Skills Manager")
-                }
-                .controlSize(.small)
+                folderControls
 
                 Spacer()
 
@@ -147,19 +152,76 @@ struct SettingsView: View {
             .padding(.horizontal, SkillsManagerSpacing.small)
             .padding(.vertical, SkillsManagerSpacing.extraSmall)
         }
-        .skillsManagerPanel(cornerRadius: SkillsManagerRadius.card)
+        .background(
+            Color(nsColor: .controlBackgroundColor),
+            in: .rect(cornerRadius: SkillsManagerRadius.card)
+        )
+        .overlay {
+            RoundedRectangle(
+                cornerRadius: SkillsManagerRadius.card,
+                style: .continuous
+            )
+            .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+        }
+        .clipShape(
+            .rect(
+                cornerRadius: SkillsManagerRadius.card,
+                style: .continuous
+            )
+        )
+    }
+
+    @ViewBuilder
+    private var folderControls: some View {
+        if #available(macOS 26.0, *) {
+            folderControlGroup
+                .buttonStyle(.glass)
+        } else {
+            folderControlGroup
+        }
+    }
+
+    private var folderControlGroup: some View {
+        ControlGroup {
+            addFolderMenu
+
+            Button {
+                sourceBeingRemoved = selectedSource
+            } label: {
+                Label("Remove Selected Folder", systemImage: "minus")
+                    .labelStyle(.iconOnly)
+            }
+            .disabled(selectedSource == nil)
+            .help("Remove the selected folder from Skills Manager")
+        }
+        .controlSize(.small)
     }
 
     private var addFolderMenu: some View {
         Menu {
             AgentDirectoryMenuContent { agent, defaultDirectory in
-                newFolderAgent = agent
-                folderDialogDefaultDirectory = defaultDirectory
-                isChoosingFolder = true
+                beginAddingFolder(
+                    for: agent,
+                    defaultDirectory: defaultDirectory
+                )
             }
         } label: {
             Label("Add Folder", systemImage: "plus")
                 .labelStyle(.iconOnly)
+        }
+        .help("Add a folder that contains an agent’s skills")
+    }
+
+    private var emptyStateAddFolderMenu: some View {
+        Menu {
+            AgentDirectoryMenuContent { agent, defaultDirectory in
+                beginAddingFolder(
+                    for: agent,
+                    defaultDirectory: defaultDirectory
+                )
+            }
+        } label: {
+            Label("Add Folder", systemImage: "plus")
         }
         .help("Add a folder that contains an agent’s skills")
     }
@@ -173,7 +235,13 @@ struct SettingsView: View {
     }
 
     private func folderRow(_ source: SkillSource) -> some View {
-        HStack(spacing: SkillsManagerSpacing.medium) {
+        let state = model.sourceState(for: source.id)
+        let presentation = FolderSettingsRowPresentation(
+            source: source,
+            state: state
+        )
+
+        return HStack(spacing: SkillsManagerSpacing.medium) {
             Image(systemName: source.agent.systemImage)
                 .font(.title3)
                 .foregroundStyle(.secondary)
@@ -192,73 +260,166 @@ struct SettingsView: View {
                         .lineLimit(1)
                 }
 
-                Text(source.directoryURL.path(percentEncoded: false))
+                Text(presentation.displayPath)
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .help(source.directoryURL.path(percentEncoded: false))
+                    .help(presentation.displayPath)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "\(source.displayName), \(source.agent.displayName), \(presentation.displayPath)"
+            )
 
             Spacer(minLength: SkillsManagerSpacing.medium)
 
-            sourceStatus(source)
+            sourceStatus(presentation, state: state)
+
+            if presentation.showsReconnectAction {
+                Button("Reconnect…", systemImage: "folder.badge.questionmark") {
+                    beginReconnectingFolder(source)
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .accessibilityLabel(presentation.reconnectAccessibilityLabel)
+                .help("Choose the current location of \(source.displayName)")
+            }
+
+            Toggle(
+                "Enabled",
+                isOn: Binding(
+                    get: { source.isEnabled },
+                    set: { isEnabled in
+                        setFolderEnabled(isEnabled, source: source)
+                    }
+                )
+            )
+            .toggleStyle(.switch)
+            .fixedSize()
+            .accessibilityLabel(presentation.toggleAccessibilityLabel)
+            .accessibilityValue(source.isEnabled ? "On" : "Off")
+            .accessibilityHint(presentation.stateAccessibilityLabel)
+            .accessibilityActions {
+                if presentation.showsReconnectAction {
+                    Button(presentation.reconnectAccessibilityLabel) {
+                        beginReconnectingFolder(source)
+                    }
+                }
+            }
+            .help(
+                source.isEnabled
+                    ? "Pause scanning \(source.displayName)"
+                    : "Resume scanning \(source.displayName)"
+            )
         }
         .padding(.vertical, SkillsManagerSpacing.extraSmall)
-        .opacity(source.isEnabled ? 1 : 0.55)
         .contentShape(.rect)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "\(source.displayName), \(source.agent.displayName), \(source.directoryURL.path(percentEncoded: false)), \(sourceStatusLabel(source))"
-        )
+        .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder
-    private func sourceStatus(_ source: SkillSource) -> some View {
-        switch model.sourceState(for: source.id) {
-        case .available:
-            Image(systemName: source.isEnabled ? "checkmark.circle" : "pause.circle")
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-        case .scanning:
-            ProgressView()
-                .controlSize(.small)
-                .accessibilityHidden(true)
-        case .unavailable:
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-                .accessibilityHidden(true)
+    private func sourceStatus(
+        _ presentation: FolderSettingsRowPresentation,
+        state: SkillLibraryModel.SourceState
+    ) -> some View {
+        if let statusText = presentation.statusText {
+            HStack(spacing: SkillsManagerSpacing.extraSmall) {
+                if let statusSystemImage = presentation.statusSystemImage {
+                    Image(systemName: statusSystemImage)
+                        .foregroundStyle(
+                            state == .unavailable
+                                ? Color.orange
+                                : Color.secondary
+                        )
+                        .accessibilityHidden(true)
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityHidden(true)
+                }
+
+                Text(statusText)
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption)
+            .fixedSize()
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(presentation.stateAccessibilityLabel)
         }
     }
 
-    private func sourceStatusLabel(_ source: SkillSource) -> String {
-        switch model.sourceState(for: source.id) {
-        case .available:
-            source.isEnabled ? "available" : "disabled"
-        case .scanning:
-            "scanning"
-        case .unavailable:
-            "unavailable"
+    private func beginAddingFolder(
+        for agent: SkillAgent,
+        defaultDirectory: URL?
+    ) {
+        sourceBeingReconnected = nil
+        newFolderAgent = agent
+        folderDialogDefaultDirectory = defaultDirectory
+        isChoosingFolder = true
+    }
+
+    private func beginReconnectingFolder(_ source: SkillSource) {
+        sourceBeingReconnected = source.id
+        folderDialogDefaultDirectory =
+            source.directoryURL
+            .deletingLastPathComponent()
+        isChoosingFolder = true
+    }
+
+    private func setFolderEnabled(
+        _ isEnabled: Bool,
+        source: SkillSource
+    ) {
+        guard source.isEnabled != isEnabled else {
+            return
+        }
+
+        perform("Unable to Update Folder") {
+            try await model.setSourceEnabled(
+                isEnabled,
+                sourceID: source.id
+            )
         }
     }
 
     private func handleFolderImport(_ result: Result<[URL], any Error>) {
         let agent = newFolderAgent
+        let reconnectSourceID = sourceBeingReconnected
+        let errorTitle =
+            reconnectSourceID == nil
+            ? "Unable to Add Folder"
+            : "Unable to Reconnect Folder"
 
         Task { @MainActor in
+            defer {
+                sourceBeingReconnected = nil
+                folderDialogDefaultDirectory = nil
+            }
+
             do {
                 guard let folderURL = try result.get().first else {
                     return
                 }
 
-                try await model.addSource(at: folderURL, agent: agent)
-                folderSelection.reconcile(with: model.sources)
+                if let reconnectSourceID {
+                    try await model.relocateSource(
+                        reconnectSourceID,
+                        to: folderURL
+                    )
+                    folderSelection.sourceID = reconnectSourceID
+                } else {
+                    try await model.addSource(at: folderURL, agent: agent)
+                    folderSelection.reconcile(with: model.sources)
 
-                if case .source(let sourceID) = model.sidebarSelection {
-                    folderSelection.sourceID = sourceID
+                    if case .source(let sourceID) = model.sidebarSelection {
+                        folderSelection.sourceID = sourceID
+                    }
                 }
+            } catch let error as CocoaError where error.code == .userCancelled {
+                return
             } catch {
-                model.report(error, title: "Unable to Add Folder")
+                model.report(error, title: errorTitle)
             }
         }
     }
@@ -281,13 +442,86 @@ struct FolderSettingsSelection {
     var sourceID: SkillSource.ID?
 
     mutating func reconcile(with sources: [SkillSource]) {
-        guard
-            let sourceID,
-            sources.contains(where: { $0.id == sourceID })
-        else {
-            sourceID = sources.first?.id
+        guard let sourceID else {
             return
         }
+
+        if sources.contains(where: { $0.id == sourceID }) == false {
+            self.sourceID = nil
+        }
+    }
+}
+
+@MainActor
+struct FolderSettingsRowPresentation {
+    let displayPath: String
+    let statusText: String?
+    let statusSystemImage: String?
+    let showsReconnectAction: Bool
+    let stateAccessibilityLabel: String
+    let toggleAccessibilityLabel: String
+    let reconnectAccessibilityLabel: String
+
+    init(
+        source: SkillSource,
+        state: SkillLibraryModel.SourceState,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) {
+        displayPath = Self.displayPath(
+            for: source.directoryURL,
+            homeDirectory: homeDirectory
+        )
+        toggleAccessibilityLabel = "Enable \(source.displayName)"
+        reconnectAccessibilityLabel = "Reconnect \(source.displayName)"
+
+        switch (state, source.isEnabled) {
+        case (.unavailable, _):
+            statusText = "Missing"
+            statusSystemImage = "exclamationmark.triangle.fill"
+            showsReconnectAction = true
+            stateAccessibilityLabel = "Missing. Reconnect available."
+        case (_, false):
+            statusText = "Paused"
+            statusSystemImage = "pause.circle"
+            showsReconnectAction = false
+            stateAccessibilityLabel = "Paused"
+        case (.available, true):
+            statusText = nil
+            statusSystemImage = nil
+            showsReconnectAction = false
+            stateAccessibilityLabel = "Available"
+        case (.scanning, true):
+            statusText = "Scanning…"
+            statusSystemImage = nil
+            showsReconnectAction = false
+            stateAccessibilityLabel = "Scanning"
+        }
+    }
+
+    private static func displayPath(
+        for directoryURL: URL,
+        homeDirectory: URL
+    ) -> String {
+        let path = trimmedPath(directoryURL.path(percentEncoded: false))
+        let homePath = trimmedPath(homeDirectory.path(percentEncoded: false))
+
+        if path == homePath {
+            return "~"
+        }
+
+        if path.hasPrefix("\(homePath)/") {
+            return "~\(path.dropFirst(homePath.count))"
+        }
+
+        return path
+    }
+
+    private static func trimmedPath(_ path: String) -> String {
+        guard path != "/" else {
+            return path
+        }
+
+        return path.replacing(/\/+$/, with: "")
     }
 }
 

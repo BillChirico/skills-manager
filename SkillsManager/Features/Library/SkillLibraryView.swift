@@ -69,7 +69,18 @@ struct SkillLibraryView: View {
         }
     }
 
+    @ViewBuilder
     private var discoverButton: some View {
+        if #available(macOS 26.0, *) {
+            discoverAction
+                .buttonStyle(.glassProminent)
+        } else {
+            discoverAction
+                .buttonStyle(.borderedProminent)
+        }
+    }
+
+    private var discoverAction: some View {
         Button("Discover", systemImage: "globe") {
             isShowingCatalog = true
         }
@@ -108,10 +119,9 @@ struct SkillLibraryView: View {
     private var settingsButton: some View {
         if #available(macOS 26.0, *) {
             settingsLink
-                .buttonStyle(.glassProminent)
         } else {
             settingsLink
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
         }
     }
 
@@ -119,7 +129,8 @@ struct SkillLibraryView: View {
         SettingsLink {
             Label("Settings", systemImage: "gearshape")
         }
-        .labelStyle(.titleAndIcon)
+        .labelStyle(.iconOnly)
+        .accessibilityLabel("Settings")
         .help("Manage skill folders and app settings")
     }
 

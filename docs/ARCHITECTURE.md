@@ -33,11 +33,13 @@ separate catalog model coordinates debounced skills.sh searches and
 installations so network and filesystem work remain independently testable.
 Agent models expose their standard user skill-directory paths, which the app
 uses as picker starting points without bypassing the sandbox’s user-consent
-boundary. `SettingsView` owns folder-add and folder-remove presentation,
-including the agent-aware picker menu, list selection, and destructive
-confirmation. The library routes its toolbar and empty states to the Settings
-scene; contextual relocation remains in the library for unavailable sources.
-All mutations still pass through `SkillLibraryModel`.
+boundary. `SettingsView` owns folder-add, folder-remove, enabled-state, and
+reconnect presentation, including the agent-aware picker menu, explicit list
+selection, and destructive confirmation. Selection reconciliation preserves a
+valid user selection but never chooses a folder on the user's behalf. The
+library routes its empty states to the Settings scene; contextual relocation
+also remains in the library for unavailable sources. All mutations still pass
+through `SkillLibraryModel`.
 
 ## Domain layer
 
@@ -82,13 +84,21 @@ reduced transparency, and reduced motion.
 The library window titles itself after the selected scope and subtitles itself
 with the count in view, so the title bar reports state instead of repeating the
 app name. Toolbar actions form two groups separated by a `ToolbarSpacer`:
-discovery and the prominent Settings action, then the sort and search controls
-that change how the library is displayed. Settings is also available through
-the app menu and `Command-,`. `SkillsCore` still owns no AppKit, but
+prominent discovery and icon-only Settings utilities, then the sort and search
+controls that change how the library is displayed. Settings is also available
+through the app menu and `Command-,`. `SkillsCore` still owns no AppKit, but
 `Shared/VisualStyle/ToolbarSearchFieldWidth.swift` bridges to
 `NSSearchToolbarItem` because SwiftUI exposes no way to stop a toolbar search
 field from growing wider than every action beside it. Prefer a native SwiftUI
 API and add a bridge like this only when none exists.
+
+Settings uses a grouped native `Form` and a resizable minimum/ideal frame. Its
+static folder list uses semantic control and separator colors; Liquid Glass is
+reserved for interactive controls on macOS 26. Healthy rows omit decorative
+status icons. Paused, scanning, and missing states use readable text, and row
+toggles remain distinct accessibility elements. Since macOS folds a secondary
+button into a selectable list row, unavailable rows also expose Reconnect as a
+source-specific named accessibility action on the row Toggle.
 
 The app sandbox permits outbound network access, user-selected read/write
 access, and app-scoped bookmarks. Directory grants are stored as
@@ -97,7 +107,15 @@ remains configured. Failed resolution is surfaced as an unavailable source
 instead of an empty library. A URL returned by the directory picker must be
 opened with `startAccessingSecurityScopedResource()` before bookmark creation;
 add and relocation operations release that access and roll back state if
-bookmarking or persistence fails.
+bookmarking or persistence fails. Because `sources.json` carries those bookmark
+blobs and the full map of configured directories, it is written owner-only
+(`0600`) inside an owner-only directory rather than inheriting the process
+umask, which matters for unsigned builds that run outside an app container.
+
+Source mutations that roll back after a failed save re-resolve their target by
+`SkillSource.ID`, never by an index captured before the `await`. `sources` is
+main-actor isolated, but awaiting a save yields the actor, so a concurrent
+mutation can reorder or shrink the array before the rollback runs.
 
 ## Project generation
 

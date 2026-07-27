@@ -479,6 +479,58 @@ struct SkillLibraryModelTests {
         #expect(model.sourceState(for: source.id) == .available)
     }
 
+    @Test("A failed pause restores the folder it targeted")
+    func rollsBackFailedPause() async throws {
+        let source = SkillSource(
+            name: "Team Skills",
+            directoryURL: URL(filePath: "/skills/team")
+        )
+        let model = SkillLibraryModel(
+            sources: [source],
+            sourceStore: FailingSaveSourceStore()
+        )
+
+        await #expect(throws: FailingSaveSourceStore.SaveError.self) {
+            try await model.setSourceEnabled(false, sourceID: source.id)
+        }
+
+        #expect(model.sources.first?.isEnabled == true)
+    }
+
+    @Test("A failed pause rolls back after the folder list is reordered")
+    func rollsBackFailedPauseAfterConcurrentRemoval() async throws {
+        let firstSource = SkillSource(
+            name: "Alpha Skills",
+            directoryURL: URL(filePath: "/skills/alpha")
+        )
+        let pausedSource = SkillSource(
+            name: "Beta Skills",
+            directoryURL: URL(filePath: "/skills/beta")
+        )
+        let store = InterruptingSourceStore(sources: [firstSource, pausedSource])
+        let model = SkillLibraryModel(
+            sources: [firstSource, pausedSource],
+            sourceStore: store,
+            bookmarker: StubBookmarker(),
+            sourceAccess: StubSourceAccess()
+        )
+
+        #expect(model.sources.map(\.displayName) == ["Alpha Skills", "Beta Skills"])
+
+        // The removal lands while the pause is suspended on its failing save, so
+        // the index the pause captured no longer addresses the folder it targeted.
+        await store.interruptFirstSave {
+            try await model.removeSource(firstSource.id)
+        }
+
+        await #expect(throws: InterruptingSourceStore.SaveError.self) {
+            try await model.setSourceEnabled(false, sourceID: pausedSource.id)
+        }
+
+        #expect(model.sources.map(\.id) == [pausedSource.id])
+        #expect(model.sources.first?.isEnabled == true)
+    }
+
     private func makeModel(
         sourceStore: any SkillSourceStore = MemorySourceStore(),
         discoverer: any SkillDiscovering = EmptyDiscoverer()
@@ -521,6 +573,41 @@ private actor FailingSaveSourceStore: SkillSourceStore {
     }
 
     func save(_ sources: [SkillSource]) throws {
+        throw SaveError()
+    }
+}
+
+/// Runs one interruption inside the next `save`, then fails that save. Later
+/// saves succeed, so the interruption can mutate the library while the
+/// interrupted caller is still suspended.
+private actor InterruptingSourceStore: SkillSourceStore {
+    struct SaveError: Error {}
+
+    private var sources: [SkillSource]
+    private var interruption: (@MainActor @Sendable () async throws -> Void)?
+
+    init(sources: [SkillSource] = []) {
+        self.sources = sources
+    }
+
+    func interruptFirstSave(
+        with interruption: @escaping @MainActor @Sendable () async throws -> Void
+    ) {
+        self.interruption = interruption
+    }
+
+    func loadSources() -> [SkillSource] {
+        sources
+    }
+
+    func save(_ sources: [SkillSource]) async throws {
+        guard let interruption else {
+            self.sources = sources
+            return
+        }
+
+        self.interruption = nil
+        try await interruption()
         throw SaveError()
     }
 }

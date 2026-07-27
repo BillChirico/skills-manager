@@ -38,10 +38,8 @@ unchanged. Move only picker ownership and add/remove presentation into
 
 - [x] **Step 1: Write the failing test**
 
-Create two Swift Testing cases. The first starts with the second of two sources
-selected and asserts reconciliation preserves it. The second starts with a
-removed source selected, asserts reconciliation selects the first remaining
-source, then asserts reconciling an empty list clears selection.
+Create Swift Testing cases that preserve a valid selection, leave a populated
+list unselected, and clear a selection after its source disappears.
 
 - [x] **Step 2: Run the focused app test**
 
@@ -59,8 +57,8 @@ Expected before implementation: compilation fails because
 - [x] **Step 3: Add the minimal selection value**
 
 Add an internal `FolderSettingsSelection` value to `SettingsView.swift`. Its
-`reconcile(with:)` method keeps an existing selected ID, otherwise assigns the
-first source ID, or assigns `nil` when no sources remain.
+`reconcile(with:)` method keeps an existing selected ID and clears it when the
+source disappears without inventing a replacement selection.
 
 - [x] **Step 4: Run the focused test again**
 
@@ -92,9 +90,9 @@ git commit -m "test: drive folder settings selection"
 - [x] **Step 1: Reduce the library picker to relocation**
 
 Remove the add-purpose state and Add Directory toolbar menu from
-`SkillLibraryView`. Keep `.fileImporter` for
-`relocateSource(_:to:)`. Promote the existing `SettingsLink` to the
-`.primaryAction` toolbar placement and retain `gearshape`.
+`SkillLibraryView`. Keep `.fileImporter` for `relocateSource(_:to:)`. Keep the
+`SettingsLink` as an icon-only `gearshape` utility and make Discover the
+prominent primary action.
 
 - [x] **Step 2: Route empty states to Settings**
 
@@ -106,8 +104,8 @@ unchanged.
 
 In `SettingsView`, use `FolderSettingsSelection` and add picker state, selected
 agent, default picker URL, and pending-removal state. Render all `model.sources`
-in a selectable list with folder name, agent, path, enabled opacity, and
-available/scanning/unavailable status.
+in a selectable list with folder name, agent, abbreviated path, enabled Toggle,
+and readable available/scanning/unavailable state.
 
 - [x] **Step 4: Add native plus/minus behavior**
 

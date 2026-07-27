@@ -371,7 +371,10 @@ final class SkillLibraryModel {
         do {
             try await persistSources()
         } catch {
-            sources[index].isEnabled = previousValue
+            guard let rollbackIndex = sources.firstIndex(where: { $0.id == sourceID }) else {
+                throw error
+            }
+            sources[rollbackIndex].isEnabled = previousValue
             throw error
         }
 

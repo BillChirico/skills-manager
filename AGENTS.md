@@ -47,12 +47,21 @@ hand-off when full Xcode is available. If Xcode is unavailable, run
 - Use native SwiftUI controls and semantic colors before custom drawing.
 - Gate macOS 26-only Liquid Glass APIs with availability checks and retain a
   usable fallback for macOS 15 through 25.
+- Reserve Liquid Glass for interactive controls; use semantic system
+  backgrounds and separators for static Settings containers.
 - Treat accessibility labels, keyboard access, empty states, and reduced motion
   as part of feature completion.
 - Keep folder addition and the primary add/remove list in Settings. Route other
   entry points to the Settings scene instead of duplicating the folder picker;
   contextual relocation for unavailable sources may remain in the library.
-- Send every folder add, relocate, or remove mutation through
+- Keep Settings folder selection explicit: preserve a valid user selection,
+  clear a stale one, and never auto-select the first row.
+- Present paused, scanning, and unavailable folder states with text rather than
+  opacity or icon-only cues. Keep row toggles and reconnect buttons separately
+  operable by assistive technologies.
+- Keep Discover visually prominent in the library toolbar and Settings as an
+  icon-only utility.
+- Send every folder add, enable, relocate, or remove mutation through
   `SkillLibraryModel` so security-scoped access, bookmarks, persistence, and
   rollback remain intact.
 
@@ -82,6 +91,16 @@ before creating its bookmark. Keep the scope active while the source is
 configured, and balance it on every bookmark or persistence failure. Suggested
 agent locations may initialize the system picker, but must never bypass explicit
 user approval.
+
+When a source mutation rolls back after a failed save, re-resolve the target by
+`SkillSource.ID` inside the `catch`. An index captured before the `await` can be
+stale, because awaiting the save yields the main actor and lets another mutation
+reorder or shrink `sources`. Persist bookmark data owner-only; never widen the
+permissions of the store file.
+
+The abbreviated `~/…` display path exists so the account name stays off screen.
+Do not pass a raw absolute path to a tooltip, label, or accessibility string that
+renders next to it.
 
 ## Change checklist
 

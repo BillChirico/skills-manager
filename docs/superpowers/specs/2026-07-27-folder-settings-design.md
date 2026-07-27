@@ -1,5 +1,11 @@
 # Folder Management Settings Design
 
+> **Review note:** The post-merge interaction and visual refinements are
+> specified in
+> `2026-07-27-folder-settings-review-followup-design.md`. That follow-up
+> supersedes this document where selection, toolbar hierarchy, row state, or
+> Settings presentation differ.
+
 ## Goal
 
 Move folder addition into Settings and give users a native macOS folder list
@@ -8,11 +14,12 @@ security-scoped bookmarks, scanning, or existing sidebar behavior.
 
 ## Product behavior
 
-- The library toolbar's primary action is Settings, represented by
-  `gearshape`. The library no longer presents an Add Directory menu.
+- The library toolbar's primary action is Discover. Settings remains available
+  as an icon-only `gearshape` utility and through the app menu. The library no
+  longer presents an Add Directory menu.
 - Empty library states open Settings instead of presenting another add menu.
-- Settings lists every configured folder with its name, assigned agent, path,
-  enabled state, and availability state.
+- Settings lists every configured folder with its name, assigned agent,
+  abbreviated path, enabled Toggle, and readable availability state.
 - The plus control presents the existing agent-aware suggested and custom
   location menu, then opens the system directory picker.
 - The minus control is disabled until a row is selected. Removing a selected
@@ -28,9 +35,9 @@ creation, persistence, rollback, scanning, selection, and security-scope
 lifetime keep their current semantics.
 
 `FolderSettingsSelection` is a small app-layer value that keeps the list
-selection valid as folders are restored, added, or removed. It preserves the
-current selection while that source exists, selects the first remaining source
-when it does not, and clears selection for an empty list.
+selection valid as folders are restored, added, or removed. It preserves an
+explicit selection while that source exists and clears it when the source
+disappears. It never selects a row on the user's behalf.
 
 The reusable agent directory menu moves from the library feature into the
 settings feature because Settings becomes its only caller. The library keeps a
@@ -41,14 +48,14 @@ project-generation input changes.
 
 ## Visual and interaction design
 
-The Settings window uses a calm app-UI hierarchy: a compact title and
-description, one selectable folder list, and joined plus/minus controls in the
-list footer. Folder rows use semantic system colors and native status symbols.
+The Settings window uses a grouped native `Form`, one selectable folder list,
+and joined plus/minus controls in the list footer. Folder rows use semantic
+system colors, full-strength names, and icon-plus-text exception states.
 
-The folder panel uses the existing `skillsManagerPanel` modifier. On macOS 26
-and newer it adopts Liquid Glass through `glassEffect`; macOS 15 through 25 use
-the existing regular-material fallback. Controls retain keyboard focus,
-VoiceOver labels, increased-contrast support, and native confirmation behavior.
+The folder panel uses semantic control and separator colors. On macOS 26 and
+newer Liquid Glass is reserved for interactive controls; macOS 15 through 25
+retain native control styling. Toggles and reconnect actions remain distinct
+VoiceOver elements, and the window has flexible minimum and ideal dimensions.
 
 ## Error handling and data safety
 
