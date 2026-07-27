@@ -1,0 +1,78 @@
+name: SkillsManager
+
+options:
+  bundleIdPrefix: ai.volvox
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "15.0"
+  developmentLanguage: en
+  xcodeVersion: "26.0"
+
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  base:
+    CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED: YES
+    CLANG_WARN_DOCUMENTATION_COMMENTS: YES
+    ENABLE_STRICT_OBJC_MSGSEND: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_VERSION: "6.0"
+
+packages:
+  SkillsCore:
+    path: Packages/SkillsCore
+
+fileGroups:
+  - README.md
+  - AGENTS.md
+  - CLAUDE.md
+  - docs
+  - SkillsManager/Support
+
+targets:
+  SkillsManager:
+    type: application
+    platform: macOS
+    sources:
+      - path: SkillsManager/App
+      - path: SkillsManager/Features
+      - path: SkillsManager/Shared
+      - path: SkillsManager/Resources
+        buildPhase: resources
+    dependencies:
+      - package: SkillsCore
+        product: SkillsCore
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_ENTITLEMENTS: SkillsManager/Support/SkillsManager.entitlements
+        CODE_SIGN_STYLE: Automatic
+        CURRENT_PROJECT_VERSION: 1
+        ENABLE_APP_SANDBOX: YES
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Skills Manager
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        INFOPLIST_KEY_NSHumanReadableCopyright: Copyright © 2026 Volvox. All rights reserved.
+        MARKETING_VERSION: 0.1.0
+        PRODUCT_BUNDLE_IDENTIFIER: ai.volvox.SkillsManager
+    scheme:
+      gatherCoverageData: true
+      testTargets:
+        - SkillsManagerTests
+
+  SkillsManagerTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/SkillsManagerTests
+    dependencies:
+      - target: SkillsManager
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: ai.volvox.SkillsManagerTests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/SkillsManager.app/Contents/MacOS/SkillsManager"
+        BUNDLE_LOADER: "$(TEST_HOST)"

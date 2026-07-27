@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-26
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Verify generated project
+        run: |
+          xcodegen generate --spec project.yml
+          git diff --exit-code -- SkillsManager.xcodeproj
+
+      - name: Test core package
+        run: swift test --package-path Packages/SkillsCore
+
+      - name: Lint Swift
+        run: make lint
+
+      - name: Test macOS app
+        run: >-
+          xcodebuild
+          -project SkillsManager.xcodeproj
+          -scheme SkillsManager
+          -destination 'platform=macOS'
+          CODE_SIGNING_ALLOWED=NO
+          test
