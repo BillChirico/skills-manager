@@ -1,38 +1,58 @@
 import Foundation
 
 public struct AgentSkill: Identifiable, Hashable, Codable, Sendable {
-    public enum ManagementState: String, Hashable, Codable, CaseIterable, Sendable {
-        case installed
-        case updateAvailable
-        case disabled
-    }
-
-    public let id: UUID
+    public let id: SkillIdentifier
     public var name: String
     public var summary: String
     public var author: String?
-    public var version: String?
+    public var installedVersion: String?
+    public var availableVersion: String?
     public var directoryURL: URL
     public var sourceID: SkillSource.ID
-    public var managementState: ManagementState
+    public var isEnabled: Bool
+    public var addedAt: Date
+    public var overview: String
+    public var lastScannedAt: Date?
 
     public init(
-        id: UUID = UUID(),
+        id: SkillIdentifier? = nil,
         name: String,
         summary: String,
         author: String? = nil,
-        version: String? = nil,
+        installedVersion: String? = nil,
+        availableVersion: String? = nil,
         directoryURL: URL,
         sourceID: SkillSource.ID,
-        managementState: ManagementState = .installed
+        relativePath: String? = nil,
+        isEnabled: Bool = true,
+        addedAt: Date = .now,
+        overview: String? = nil,
+        lastScannedAt: Date? = nil
     ) {
-        self.id = id
+        self.id =
+            id
+            ?? SkillIdentifier(
+                sourceID: sourceID,
+                relativePath: relativePath ?? directoryURL.lastPathComponent
+            )
         self.name = name
         self.summary = summary
         self.author = author
-        self.version = version
+        self.installedVersion = installedVersion
+        self.availableVersion = availableVersion
         self.directoryURL = directoryURL
         self.sourceID = sourceID
-        self.managementState = managementState
+        self.isEnabled = isEnabled
+        self.addedAt = addedAt
+        self.overview = overview ?? summary
+        self.lastScannedAt = lastScannedAt
+    }
+
+    public var hasUpdate: Bool {
+        guard let installedVersion, let availableVersion else {
+            return false
+        }
+
+        return installedVersion != availableVersion
     }
 }

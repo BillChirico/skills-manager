@@ -23,4 +23,19 @@ struct SkillSourceTests {
 
         #expect(source.displayName == "skills")
     }
+
+    @Test("Bookmark data survives source persistence")
+    func bookmarkDataRoundTrip() throws {
+        let bookmarkData = Data("security-scoped-bookmark".utf8)
+        let source = SkillSource(
+            name: "Team Skills",
+            directoryURL: URL(filePath: "/Users/example/.agents/skills"),
+            bookmarkData: bookmarkData
+        )
+
+        let encoded = try JSONEncoder().encode(source)
+        let decoded = try JSONDecoder().decode(SkillSource.self, from: encoded)
+
+        #expect(decoded.bookmarkData == bookmarkData)
+    }
 }

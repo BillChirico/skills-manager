@@ -39,6 +39,28 @@ struct SkillSearchTests {
         #expect(results.map(\.name) == ["Code Review", "Project Planner"])
     }
 
+    @Test("A name match ranks ahead of a description match")
+    func ranksNameMatchesFirst() {
+        let skills = [
+            AgentSkill(
+                name: "Design Review",
+                summary: "Review spacing in generated diagrams.",
+                directoryURL: URL(filePath: "/skills/design-review"),
+                sourceID: sourceID
+            ),
+            AgentSkill(
+                name: "Diagram",
+                summary: "Turn descriptions into editable visuals.",
+                directoryURL: URL(filePath: "/skills/diagram"),
+                sourceID: sourceID
+            ),
+        ]
+
+        let results = SkillSearch.filter(skills, query: "diagram")
+
+        #expect(results.map(\.name) == ["Diagram", "Design Review"])
+    }
+
     private var fixtures: [AgentSkill] {
         [
             AgentSkill(

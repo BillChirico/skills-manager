@@ -1,15 +1,18 @@
 # Skills Manager
 
 Skills Manager is a native macOS app for finding and managing the agent skills
-stored on your machine. The long-term product surface includes installing,
-updating, removing, searching, and organizing skills across user-selected
-directories.
+stored on your machine.
 
-This repository currently contains the first production-oriented scaffold:
+The current product surface includes:
 
-- a SwiftUI macOS app with a three-column library shell;
-- a reusable `SkillsCore` Swift package for models and domain logic;
-- macOS sandbox entitlements for user-selected skill directories;
+- a SwiftUI three-column library with smart groups, scoped search, multi-select,
+  detail tabs, and recovery-focused empty states;
+- persistent user-selected directories backed by security-scoped bookmarks;
+- local `SKILL.md` discovery with stable skill identities across rescans;
+- directory rename, enable, rescan, reveal, and remove controls;
+- independent enabled and update-availability state for each skill;
+- a reusable `SkillsCore` Swift package for discovery, persistence, models,
+  filtering, and search;
 - Swift Testing coverage for the core package and app state;
 - an XcodeGen project specification and generated Xcode project; and
 - contributor and AI-agent guidance.

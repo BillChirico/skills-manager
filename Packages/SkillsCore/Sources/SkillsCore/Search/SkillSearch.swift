@@ -10,24 +10,51 @@ public enum SkillSearch {
             .split(whereSeparator: \.isWhitespace)
             .map(String.init)
 
-        let matches: [AgentSkill]
         if terms.isEmpty {
-            matches = skills
-        } else {
-            matches = skills.filter { skill in
-                let searchableText = [
-                    skill.name,
-                    skill.summary,
-                    skill.author ?? "",
-                    skill.directoryURL.lastPathComponent,
-                ].joined(separator: " ")
+            return skills.sorted(by: localizedNameOrder)
+        }
 
-                return terms.allSatisfy(searchableText.localizedCaseInsensitiveContains)
+        return skills.compactMap { skill -> (skill: AgentSkill, score: Int)? in
+            var score = 0
+
+            for term in terms {
+                let name = normalized(skill.name)
+                let normalizedTerm = normalized(term)
+
+                if name.hasPrefix(normalizedTerm) {
+                    score += 4
+                } else if name.contains(normalizedTerm) {
+                    score += 3
+                } else if normalized(skill.author ?? "").contains(normalizedTerm) {
+                    score += 2
+                } else if normalized(skill.directoryURL.lastPathComponent).contains(normalizedTerm) {
+                    score += 2
+                } else if normalized(skill.summary).contains(normalizedTerm) {
+                    score += 1
+                } else {
+                    return nil
+                }
             }
-        }
 
-        return matches.sorted {
-            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            return (skill, score)
         }
+        .sorted { lhs, rhs in
+            if lhs.score != rhs.score {
+                return lhs.score > rhs.score
+            }
+
+            return localizedNameOrder(lhs.skill, rhs.skill)
+        }
+        .map(\.skill)
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value
+            .folding(options: .diacriticInsensitive, locale: .current)
+            .localizedLowercase
+    }
+
+    private static func localizedNameOrder(_ lhs: AgentSkill, _ rhs: AgentSkill) -> Bool {
+        lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
     }
 }
