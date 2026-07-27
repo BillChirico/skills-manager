@@ -46,14 +46,6 @@ struct SkillsManagerApp: App {
             .frame(minWidth: 900, minHeight: 560)
         }
         .defaultSize(width: 1_120, height: 720)
-        .commands {
-            CommandGroup(replacing: .appSettings) {
-                SettingsLink {
-                    Text("Settings…")
-                }
-                .keyboardShortcut(",", modifiers: .command)
-            }
-        }
 
         Settings {
             SettingsView(model: libraryModel)

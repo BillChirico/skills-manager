@@ -17,7 +17,7 @@ final class SkillLibraryModel {
         let message: String
     }
 
-    private enum SourceRecoveryError: LocalizedError {
+    private enum SourceAccessError: LocalizedError {
         case accessDenied
 
         var errorDescription: String? {
@@ -268,18 +268,28 @@ final class SkillLibraryModel {
             return
         }
 
-        let source = SkillSource(
+        var source = SkillSource(
             name: normalizedURL.lastPathComponent,
             directoryURL: normalizedURL,
-            agent: agent,
-            bookmarkData: try bookmarker?.makeBookmark(for: normalizedURL)
+            agent: agent
         )
         let accessGranted =
             sourceAccess?.beginAccessing(normalizedURL, for: source.id) ?? true
 
+        guard accessGranted else {
+            throw SourceAccessError.accessDenied
+        }
+
+        do {
+            source.bookmarkData = try bookmarker?.makeBookmark(for: normalizedURL)
+        } catch {
+            sourceAccess?.stopAccessing(sourceID: source.id)
+            throw error
+        }
+
         sources.append(source)
         sources = Self.sortedSources(sources)
-        sourceStates[source.id] = accessGranted ? .available : .unavailable
+        sourceStates[source.id] = .available
         sidebarSelection = .source(source.id)
 
         do {
@@ -292,7 +302,7 @@ final class SkillLibraryModel {
             throw error
         }
 
-        if accessGranted, discoverer != nil {
+        if discoverer != nil {
             do {
                 try await rescanSource(source.id)
             } catch {
@@ -517,19 +527,20 @@ final class SkillLibraryModel {
 
         let previousSource = sources[sourceIndex]
         let previousState = sourceStates[sourceID]
-        let bookmarkData = try bookmarker?.makeBookmark(for: directoryURL)
         let accessGranted =
             sourceAccess?.beginAccessing(directoryURL, for: sourceID) ?? true
 
         guard accessGranted else {
-            if previousState == .available,
-                sourceAccess?.beginAccessing(previousSource.directoryURL, for: sourceID) == true
-            {
-                sourceStates[sourceID] = .available
-            } else {
-                sourceStates[sourceID] = .unavailable
-            }
-            throw SourceRecoveryError.accessDenied
+            restoreSourceAccess(previousSource, state: previousState)
+            throw SourceAccessError.accessDenied
+        }
+
+        let bookmarkData: Data?
+        do {
+            bookmarkData = try bookmarker?.makeBookmark(for: directoryURL)
+        } catch {
+            restoreSourceAccess(previousSource, state: previousState)
+            throw error
         }
 
         sources[sourceIndex].directoryURL = directoryURL
@@ -545,15 +556,7 @@ final class SkillLibraryModel {
             }
             sources[rollbackIndex] = previousSource
             sources = Self.sortedSources(sources)
-
-            if previousState == .available {
-                let restoredAccess =
-                    sourceAccess?.beginAccessing(previousSource.directoryURL, for: sourceID)
-                sourceStates[sourceID] = restoredAccess == false ? .unavailable : previousState
-            } else {
-                sourceAccess?.stopAccessing(sourceID: sourceID)
-                sourceStates[sourceID] = previousState
-            }
+            restoreSourceAccess(previousSource, state: previousState)
             throw error
         }
 
@@ -568,6 +571,20 @@ final class SkillLibraryModel {
                 error,
                 title: "Unable to Scan \(previousSource.displayName)"
             )
+        }
+    }
+
+    private func restoreSourceAccess(
+        _ source: SkillSource,
+        state previousState: SourceState?
+    ) {
+        if previousState == .available {
+            let restoredAccess =
+                sourceAccess?.beginAccessing(source.directoryURL, for: source.id)
+            sourceStates[source.id] = restoredAccess == false ? .unavailable : .available
+        } else {
+            sourceAccess?.stopAccessing(sourceID: source.id)
+            sourceStates[source.id] = previousState
         }
     }
 

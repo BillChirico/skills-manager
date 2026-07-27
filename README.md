@@ -8,6 +8,8 @@ The current product surface includes:
 - a SwiftUI three-column library with smart groups, scoped search, multi-select,
   detail tabs, and recovery-focused empty states;
 - persistent user-selected directories backed by security-scoped bookmarks;
+- suggested user skill locations for Claude Code, Codex, Cursor, Gemini, and
+  GitHub Copilot, while retaining a picker for custom directories;
 - per-directory agent assignments for Claude Code, Codex, Cursor, Gemini,
   GitHub Copilot, and other tools;
 - local `SKILL.md` discovery with stable skill identities across rescans;
@@ -76,6 +78,18 @@ moving them into place, and never replaces an existing directory.
 
 Skills are copied as data and are not executed during installation. Review a
 skill on skills.sh or inspect its files before using it with an agent.
+
+## Directory access
+
+The Add Directory menu includes each supported agent’s standard user location,
+including `~/.agents/skills` for Codex and `~/.claude/skills` for Claude Code.
+Choosing a suggestion opens the system directory picker at that location; the
+app remains sandboxed, so the user must confirm the directory before Skills
+Manager can scan it.
+
+Confirmed directories are opened as security-scoped resources before the app
+creates and stores their bookmarks. This keeps the initial scan and access after
+relaunch covered by the same user grant.
 
 ## Repository layout
 

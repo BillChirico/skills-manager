@@ -71,6 +71,12 @@ The app is sandboxed. Access files only through user-selected URLs and preserve
 security-scoped access when work outlives a picker callback. Never log skill
 contents, tokens, credentials, or user-specific absolute paths.
 
+For directory add and relocation flows, start the selected URL’s security scope
+before creating its bookmark. Keep the scope active while the source is
+configured, and balance it on every bookmark or persistence failure. Suggested
+agent locations may initialize the system picker, but must never bypass explicit
+user approval.
+
 ## Change checklist
 
 1. Keep the change inside the existing dependency boundaries.
