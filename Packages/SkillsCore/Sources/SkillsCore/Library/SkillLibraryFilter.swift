@@ -14,7 +14,8 @@ public enum SkillLibraryFilter {
         sources: [SkillSource],
         scope: SkillLibraryScope,
         query: String,
-        recentCutoff: Date
+        recentCutoff: Date,
+        sortOrder: SkillSortOrder = .name
     ) -> [AgentSkill] {
         let enabledSourceIDs = Set(
             sources
@@ -38,6 +39,10 @@ public enum SkillLibraryFilter {
             }
         }
 
-        return SkillSearch.filter(scopedSkills, query: query)
+        return SkillLibrarySorter.sort(
+            SkillSearch.filter(scopedSkills, query: query),
+            sources: sources,
+            order: sortOrder
+        )
     }
 }

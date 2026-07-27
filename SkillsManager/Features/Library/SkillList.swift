@@ -4,7 +4,7 @@ import SwiftUI
 
 struct SkillList: View {
     @Bindable var model: SkillLibraryModel
-    let addDirectory: () -> Void
+    let addDirectory: (SkillAgent) -> Void
     @State private var skillIDsPendingRemoval: Set<AgentSkill.ID> = []
 
     var body: some View {
@@ -15,7 +15,9 @@ struct SkillList: View {
                 List(model.visibleSkills, selection: $model.selectedSkillIDs) { skill in
                     SkillRow(
                         skill: skill,
-                        isSelected: model.selectedSkillIDs.contains(skill.id)
+                        isSelected: model.selectedSkillIDs.contains(skill.id),
+                        agentName: model.agentName(for: skill),
+                        sourceName: model.sourceName(for: skill)
                     )
                     .tag(skill.id)
                     .contextMenu {
@@ -64,8 +66,17 @@ struct SkillList: View {
         } actions: {
             switch emptyContent.action {
             case .addDirectory:
-                Button("Add Skill Directory", systemImage: "plus", action: addDirectory)
-                    .buttonStyle(.borderedProminent)
+                Menu("Add Agent Directory", systemImage: "folder.badge.plus") {
+                    ForEach(SkillAgent.allCases) { agent in
+                        Button {
+                            addDirectory(agent)
+                        } label: {
+                            Label(agent.displayName, systemImage: agent.systemImage)
+                        }
+                    }
+                }
+                .menuStyle(.button)
+                .buttonStyle(.borderedProminent)
             case .rescan(let sourceID):
                 Button("Rescan") {
                     Task { @MainActor in
@@ -127,6 +138,20 @@ struct SkillList: View {
 
         Button("Reveal in Finder", systemImage: "finder") {
             NSWorkspace.shared.activateFileViewerSelecting([skill.directoryURL])
+        }
+
+        Button("Open SKILL.md", systemImage: "doc.text") {
+            NSWorkspace.shared.open(
+                skill.directoryURL.appending(path: "SKILL.md", directoryHint: .notDirectory)
+            )
+        }
+
+        Button("Copy Path", systemImage: "doc.on.doc") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(
+                skill.directoryURL.path(percentEncoded: false),
+                forType: .string
+            )
         }
 
         Divider()
@@ -220,6 +245,8 @@ struct SkillList: View {
 private struct SkillRow: View {
     let skill: AgentSkill
     let isSelected: Bool
+    let agentName: String
+    let sourceName: String
 
     var body: some View {
         HStack(spacing: SkillsManagerSpacing.medium) {
@@ -246,6 +273,15 @@ private struct SkillRow: View {
                     .foregroundStyle(
                         isSelected
                             ? Color.white.opacity(0.84)
+                            : Color.secondary
+                    )
+                    .lineLimit(1)
+
+                Text("\(agentName) • \(sourceName)")
+                    .font(.caption)
+                    .foregroundStyle(
+                        isSelected
+                            ? Color.white.opacity(0.72)
                             : Color.secondary
                     )
                     .lineLimit(1)
@@ -278,6 +314,8 @@ private struct SkillRow: View {
         [
             skill.name,
             skill.summary,
+            agentName,
+            sourceName,
             skill.hasUpdate ? "Update available" : nil,
             skill.isEnabled ? nil : "Disabled",
         ]

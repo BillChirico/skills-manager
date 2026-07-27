@@ -1,20 +1,48 @@
+import SkillsCore
 import SwiftUI
 
 struct SettingsView: View {
+    @Bindable var model: SkillLibraryModel
+
     var body: some View {
         Form {
-            LabeledContent("Skill directories") {
-                Text("Managed from the Library sidebar")
-                    .foregroundStyle(.secondary)
+            Section("Agent Directories") {
+                if model.sources.isEmpty {
+                    Text("Add a directory from the Library window to configure an agent.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(model.sources) { source in
+                        LabeledContent {
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(source.displayName)
+                                Text(source.directoryURL.path(percentEncoded: false))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                        } label: {
+                            Label(source.agent.displayName, systemImage: source.agent.systemImage)
+                        }
+                    }
+                }
             }
 
-            LabeledContent("Updates") {
-                Text("Manual")
-                    .foregroundStyle(.secondary)
+            Section("Discovery") {
+                LabeledContent("Catalog") {
+                    Text("skills.sh")
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(
+                    "Search results come from skills.sh. Installations copy the selected skill into an enabled agent directory."
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
         .padding()
-        .frame(width: 480)
+        .frame(width: 560, height: 360)
     }
 }
