@@ -97,6 +97,25 @@ struct FolderSettingsRowPresentationTests {
         #expect(presentation.toggleAccessibilityLabel == "Enable Claude")
     }
 
+    @Test("A disabled row remains paused while an earlier scan winds down")
+    func disabledStateTakesPriorityOverScanning() {
+        let source = makeSource(
+            name: "Claude",
+            path: "/Users/reviewer/.claude/skills",
+            isEnabled: false
+        )
+
+        let presentation = FolderSettingsRowPresentation(
+            source: source,
+            state: .scanning,
+            homeDirectory: homeDirectory
+        )
+
+        #expect(presentation.statusText == "Paused")
+        #expect(presentation.statusSystemImage == "pause.circle")
+        #expect(presentation.stateAccessibilityLabel == "Paused")
+    }
+
     @Test("An unavailable row exposes a named reconnect action")
     func unavailableStateExposesReconnect() {
         let source = makeSource(

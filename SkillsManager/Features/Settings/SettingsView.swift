@@ -466,27 +466,27 @@ struct FolderSettingsRowPresentation {
         toggleAccessibilityLabel = "Enable \(source.displayName)"
         reconnectAccessibilityLabel = "Reconnect \(source.displayName)"
 
-        switch state {
-        case .available where source.isEnabled:
-            statusText = nil
-            statusSystemImage = nil
-            showsReconnectAction = false
-            stateAccessibilityLabel = "Available"
-        case .available:
-            statusText = "Paused"
-            statusSystemImage = "pause.circle"
-            showsReconnectAction = false
-            stateAccessibilityLabel = "Paused"
-        case .scanning:
-            statusText = "Scanning…"
-            statusSystemImage = nil
-            showsReconnectAction = false
-            stateAccessibilityLabel = "Scanning"
-        case .unavailable:
+        switch (state, source.isEnabled) {
+        case (.unavailable, _):
             statusText = "Missing"
             statusSystemImage = "exclamationmark.triangle.fill"
             showsReconnectAction = true
             stateAccessibilityLabel = "Missing. Reconnect available."
+        case (_, false):
+            statusText = "Paused"
+            statusSystemImage = "pause.circle"
+            showsReconnectAction = false
+            stateAccessibilityLabel = "Paused"
+        case (.available, true):
+            statusText = nil
+            statusSystemImage = nil
+            showsReconnectAction = false
+            stateAccessibilityLabel = "Available"
+        case (.scanning, true):
+            statusText = "Scanning…"
+            statusSystemImage = nil
+            showsReconnectAction = false
+            stateAccessibilityLabel = "Scanning"
         }
     }
 
