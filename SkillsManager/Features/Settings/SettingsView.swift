@@ -35,7 +35,7 @@ struct SettingsView: View {
                 }
 
                 Text(
-                    "Search results come from skills.sh. Installations copy the selected skill into an enabled agent directory."
+                    "Search skills.sh and install into any enabled agent folder."
                 )
                 .font(.callout)
                 .foregroundStyle(.secondary)
