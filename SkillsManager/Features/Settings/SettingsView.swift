@@ -265,7 +265,7 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .help(source.directoryURL.path(percentEncoded: false))
+                    .help(presentation.displayPath)
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel(
