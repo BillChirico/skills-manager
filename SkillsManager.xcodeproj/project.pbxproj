@@ -11,6 +11,7 @@
 		0D2F8EFCAD442A66EF4F0D9F /* SkillCatalogModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A52F3B3441ED487F6728B46 /* SkillCatalogModel.swift */; };
 		21D6A6770E2DD650E15DB662 /* SkillLibraryModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A6FD9583210F461B8C10058 /* SkillLibraryModelTests.swift */; };
 		2678B79191361B36FBEE9437 /* SkillLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D215E0EA89D2A7E8FD5C62D6 /* SkillLibraryView.swift */; };
+		274010532DA2BEA0563ADF53 /* FolderSettingsSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB03C98862CC786DC11BBEC3 /* FolderSettingsSelectionTests.swift */; };
 		2AB3DEA01BB887D5C3C0F32F /* ToolbarSearchFieldWidth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93A141CC23CA196562F6ACF7 /* ToolbarSearchFieldWidth.swift */; };
 		33E95BDDB4C71F7967E8CF92 /* SkillCatalogModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5B42EA428CD24B04056DDE1 /* SkillCatalogModelTests.swift */; };
 		3744736E0CC69687A3FCD69C /* SkillLibraryScopeTitleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2138FB85F681287F0500AD /* SkillLibraryScopeTitleTests.swift */; };
@@ -49,6 +50,7 @@
 		45D33B62086982B7ED9100D8 /* AGENTS.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = AGENTS.md; sourceTree = "<group>"; };
 		4816B3E9012AB1F4A53BEE77 /* SkillsManagerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillsManagerApp.swift; sourceTree = "<group>"; };
 		4A52F3B3441ED487F6728B46 /* SkillCatalogModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillCatalogModel.swift; sourceTree = "<group>"; };
+		560792EB417C14855F48371C /* 2026-07-27-folder-settings.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "2026-07-27-folder-settings.md"; sourceTree = "<group>"; };
 		6A4E285DCEC62A32FE2BCFD8 /* SkillSourceSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillSourceSidebar.swift; sourceTree = "<group>"; };
 		71E86521947227FAD14E43AA /* SkillsManager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SkillsManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		722F8D554E99C8E055634971 /* SkillSourceAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillSourceAccess.swift; sourceTree = "<group>"; };
@@ -62,11 +64,13 @@
 		A08B991B2714753A37B17F5B /* SkillLibraryOrganizationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryOrganizationTests.swift; sourceTree = "<group>"; };
 		A4BFFAD3E6AB156341E9F95B /* SkillsManagerAppTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillsManagerAppTests.swift; sourceTree = "<group>"; };
 		B5B42EA428CD24B04056DDE1 /* SkillCatalogModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillCatalogModelTests.swift; sourceTree = "<group>"; };
+		BB03C98862CC786DC11BBEC3 /* FolderSettingsSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderSettingsSelectionTests.swift; sourceTree = "<group>"; };
 		D0EED475D6F3CC38D0FCFFD2 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		D215E0EA89D2A7E8FD5C62D6 /* SkillLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryView.swift; sourceTree = "<group>"; };
 		D298670C70296E0E9836ADF9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		DD2138FB85F681287F0500AD /* SkillLibraryScopeTitleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryScopeTitleTests.swift; sourceTree = "<group>"; };
 		E400BD791ADC589ADFD33C19 /* SkillCatalogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillCatalogView.swift; sourceTree = "<group>"; };
+		E6DD7D944224CEC48C29FE22 /* 2026-07-27-folder-settings-design.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "2026-07-27-folder-settings-design.md"; sourceTree = "<group>"; };
 		E95C035BE8E05F56821929B1 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		FC8D81DE9B146956C34EDC28 /* SkillsCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SkillsCore; path = Packages/SkillsCore; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
@@ -115,6 +119,7 @@
 			children = (
 				37F149A4B015DBBCBBA5C67E /* App */,
 				4E25364D4B0A480D9DEA6CAB /* Catalog */,
+				D7C37D869B0502FC3B7BDA67 /* Settings */,
 			);
 			path = SkillsManagerTests;
 			sourceTree = "<group>";
@@ -168,6 +173,7 @@
 			isa = PBXGroup;
 			children = (
 				9012D9D210AEF08DCBE01777 /* ARCHITECTURE.md */,
+				BB9D3C67CAFC2D97C1F841FD /* superpowers */,
 			);
 			path = docs;
 			sourceTree = "<group>";
@@ -178,6 +184,14 @@
 				D298670C70296E0E9836ADF9 /* Assets.xcassets */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		85782D35C29938212DD2BC13 /* specs */ = {
+			isa = PBXGroup;
+			children = (
+				E6DD7D944224CEC48C29FE22 /* 2026-07-27-folder-settings-design.md */,
+			);
+			path = specs;
 			sourceTree = "<group>";
 		};
 		94DF0A2408CB4C02531EE436 /* Features */ = {
@@ -213,6 +227,23 @@
 			path = Library;
 			sourceTree = "<group>";
 		};
+		BB9D3C67CAFC2D97C1F841FD /* superpowers */ = {
+			isa = PBXGroup;
+			children = (
+				BD0A94F010C43EBC39FA8A6A /* plans */,
+				85782D35C29938212DD2BC13 /* specs */,
+			);
+			path = superpowers;
+			sourceTree = "<group>";
+		};
+		BD0A94F010C43EBC39FA8A6A /* plans */ = {
+			isa = PBXGroup;
+			children = (
+				560792EB417C14855F48371C /* 2026-07-27-folder-settings.md */,
+			);
+			path = plans;
+			sourceTree = "<group>";
+		};
 		CC56A8FD91FC65855EEC6C19 = {
 			isa = PBXGroup;
 			children = (
@@ -225,6 +256,14 @@
 				5C94095DE9797BF54E86650C /* Tests */,
 				E3C5A2C60A157CCF5CCA5040 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		D7C37D869B0502FC3B7BDA67 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				BB03C98862CC786DC11BBEC3 /* FolderSettingsSelectionTests.swift */,
+			);
+			path = Settings;
 			sourceTree = "<group>";
 		};
 		E1379E1E9C652484CDE293AF /* Shared */ = {
@@ -347,6 +386,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				274010532DA2BEA0563ADF53 /* FolderSettingsSelectionTests.swift in Sources */,
 				33E95BDDB4C71F7967E8CF92 /* SkillCatalogModelTests.swift in Sources */,
 				21D6A6770E2DD650E15DB662 /* SkillLibraryModelTests.swift in Sources */,
 				F4A10445C675EABDC1AFC8AF /* SkillLibraryOrganizationTests.swift in Sources */,

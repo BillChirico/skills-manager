@@ -20,7 +20,10 @@ The current product surface includes:
   path of, and removing a skill;
 - directory rename, agent assignment, enable, rescan, reveal, and remove
   controls;
-- Settings access from the toolbar and the standard app menu;
+- a Settings folder list with native plus/minus management controls, agent-aware
+  suggested locations, and non-destructive removal;
+- Settings access from the library's primary toolbar action and the standard app
+  menu;
 - independent enabled and update-availability state for each skill;
 - a reusable `SkillsCore` Swift package for discovery, persistence, models,
   filtering, search, catalog access, and safe package installation;
@@ -81,15 +84,19 @@ skill on skills.sh or inspect its files before using it with an agent.
 
 ## Directory access
 
-The Add Directory menu includes each supported agent’s standard user location,
-including `~/.agents/skills` for Codex and `~/.claude/skills` for Claude Code.
+Settings lists every configured skill folder. Its plus menu includes each
+supported agent’s standard user location, including `~/.agents/skills` for
+Codex and `~/.claude/skills` for Claude Code, along with custom locations.
 Choosing a suggestion opens the system directory picker at that location; the
-app remains sandboxed, so the user must confirm the directory before Skills
-Manager can scan it.
+app remains sandboxed, so the user must confirm the folder before Skills
+Manager can scan it. Empty library states open Settings rather than duplicating
+this picker flow.
 
 Confirmed directories are opened as security-scoped resources before the app
 creates and stores their bookmarks. This keeps the initial scan and access after
-relaunch covered by the same user grant.
+relaunch covered by the same user grant. Selecting a Settings row and using the
+minus control removes only the Skills Manager configuration after confirmation;
+the folder and its files remain on disk.
 
 ## Repository layout
 

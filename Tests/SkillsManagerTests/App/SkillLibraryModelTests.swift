@@ -355,7 +355,7 @@ struct SkillLibraryModelTests {
 
         await model.restoreSources()
 
-        await #expect(throws: SkillLibraryModel.SourceRecoveryError.accessDenied) {
+        await #expect(throws: SkillLibraryModel.SourceAccessError.accessDenied) {
             try await model.relocateSource(
                 source.id,
                 to: URL(filePath: "/skills/relocated/team")

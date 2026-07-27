@@ -33,7 +33,11 @@ separate catalog model coordinates debounced skills.sh searches and
 installations so network and filesystem work remain independently testable.
 Agent models expose their standard user skill-directory paths, which the app
 uses as picker starting points without bypassing the sandbox’s user-consent
-boundary.
+boundary. `SettingsView` owns folder-add and folder-remove presentation,
+including the agent-aware picker menu, list selection, and destructive
+confirmation. The library routes its toolbar and empty states to the Settings
+scene; contextual relocation remains in the library for unavailable sources.
+All mutations still pass through `SkillLibraryModel`.
 
 ## Domain layer
 
@@ -78,10 +82,10 @@ reduced transparency, and reduced motion.
 The library window titles itself after the selected scope and subtitles itself
 with the count in view, so the title bar reports state instead of repeating the
 app name. Toolbar actions form two groups separated by a `ToolbarSpacer`:
-discovery and directory actions that add to the library, then the sort and
-search controls that change how it is displayed. Settings is reached through the
-app menu and `Command-,` rather than a toolbar button. `SkillsCore` still owns
-no AppKit, but `Shared/VisualStyle/ToolbarSearchFieldWidth.swift` bridges to
+discovery and the prominent Settings action, then the sort and search controls
+that change how the library is displayed. Settings is also available through
+the app menu and `Command-,`. `SkillsCore` still owns no AppKit, but
+`Shared/VisualStyle/ToolbarSearchFieldWidth.swift` bridges to
 `NSSearchToolbarItem` because SwiftUI exposes no way to stop a toolbar search
 field from growing wider than every action beside it. Prefer a native SwiftUI
 API and add a bridge like this only when none exists.
