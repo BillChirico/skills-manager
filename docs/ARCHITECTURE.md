@@ -107,7 +107,15 @@ remains configured. Failed resolution is surfaced as an unavailable source
 instead of an empty library. A URL returned by the directory picker must be
 opened with `startAccessingSecurityScopedResource()` before bookmark creation;
 add and relocation operations release that access and roll back state if
-bookmarking or persistence fails.
+bookmarking or persistence fails. Because `sources.json` carries those bookmark
+blobs and the full map of configured directories, it is written owner-only
+(`0600`) inside an owner-only directory rather than inheriting the process
+umask, which matters for unsigned builds that run outside an app container.
+
+Source mutations that roll back after a failed save re-resolve their target by
+`SkillSource.ID`, never by an index captured before the `await`. `sources` is
+main-actor isolated, but awaiting a save yields the actor, so a concurrent
+mutation can reorder or shrink the array before the rollback runs.
 
 ## Project generation
 

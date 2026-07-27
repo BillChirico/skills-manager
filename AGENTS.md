@@ -92,6 +92,16 @@ configured, and balance it on every bookmark or persistence failure. Suggested
 agent locations may initialize the system picker, but must never bypass explicit
 user approval.
 
+When a source mutation rolls back after a failed save, re-resolve the target by
+`SkillSource.ID` inside the `catch`. An index captured before the `await` can be
+stale, because awaiting the save yields the main actor and lets another mutation
+reorder or shrink `sources`. Persist bookmark data owner-only; never widen the
+permissions of the store file.
+
+The abbreviated `~/…` display path exists so the account name stays off screen.
+Do not pass a raw absolute path to a tooltip, label, or accessibility string that
+renders next to it.
+
 ## Change checklist
 
 1. Keep the change inside the existing dependency boundaries.
