@@ -14,19 +14,19 @@ operations.
 
 ## Review contract
 
-- [ ] Discover is prominent; Settings is an icon-only utility.
-- [ ] Settings opens without auto-selecting a row and clears stale selection.
-- [ ] Disabled rows retain readable contrast and show `Paused` as icon + text.
-- [ ] Rows provide an accessible enabled Toggle and unavailable rows provide
+- [x] Discover is prominent; Settings is an icon-only utility.
+- [x] Settings opens without auto-selecting a row and clears stale selection.
+- [x] Disabled rows retain readable contrast and show `Paused` as icon + text.
+- [x] Rows provide an accessible enabled Toggle and unavailable rows provide
   `Reconnect…`.
-- [ ] Settings uses grouped Form sections without a redundant large title.
-- [ ] The folder footer uses the semantic separator color and safe direction.
-- [ ] The static list container uses semantic background, not Liquid Glass.
-- [ ] Paths abbreviate the home directory and trim trailing slashes.
-- [ ] Healthy-row status checkmarks are removed.
-- [ ] The skills.sh catalog uses a native trailing Link layout.
-- [ ] The empty state includes an Add Folder action menu.
-- [ ] The Settings window is resizable with minimum and ideal dimensions.
+- [x] Settings uses grouped Form sections without a redundant large title.
+- [x] The folder footer uses the semantic separator color and safe direction.
+- [x] The static list container uses semantic background, not Liquid Glass.
+- [x] Paths abbreviate the home directory and trim trailing slashes.
+- [x] Healthy-row status checkmarks are removed.
+- [x] The skills.sh catalog uses a native trailing Link layout.
+- [x] The empty state includes an Add Folder action menu.
+- [x] The Settings window is resizable with minimum and ideal dimensions.
 
 ## Test-driven implementation
 

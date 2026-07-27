@@ -20,10 +20,11 @@ The current product surface includes:
   path of, and removing a skill;
 - directory rename, agent assignment, enable, rescan, reveal, and remove
   controls;
-- a Settings folder list with native plus/minus management controls, agent-aware
+- a resizable Settings folder list with native plus/minus management controls,
+  per-folder enabled toggles, unavailable-folder reconnect actions, agent-aware
   suggested locations, and non-destructive removal;
-- Settings access from the library's primary toolbar action and the standard app
-  menu;
+- a prominent Discover toolbar action, icon-only Settings access, and the
+  standard Settings app-menu command;
 - independent enabled and update-availability state for each skill;
 - a reusable `SkillsCore` Swift package for discovery, persistence, models,
   filtering, search, catalog access, and safe package installation;
@@ -90,13 +91,17 @@ Codex and `~/.claude/skills` for Claude Code, along with custom locations.
 Choosing a suggestion opens the system directory picker at that location; the
 app remains sandboxed, so the user must confirm the folder before Skills
 Manager can scan it. Empty library states open Settings rather than duplicating
-this picker flow.
+this picker flow. Settings itself includes an Add Folder action when the list is
+empty.
 
 Confirmed directories are opened as security-scoped resources before the app
 creates and stores their bookmarks. This keeps the initial scan and access after
-relaunch covered by the same user grant. Selecting a Settings row and using the
-minus control removes only the Skills Manager configuration after confirmation;
-the folder and its files remain on disk.
+relaunch covered by the same user grant. Settings opens without selecting a
+folder on the user's behalf. Each row can pause or resume scanning, unavailable
+rows can reconnect through the system picker, and paths under the home directory
+are abbreviated with `~`. Selecting a row and using the minus control removes
+only the Skills Manager configuration after confirmation; the folder and its
+files remain on disk.
 
 ## Repository layout
 
