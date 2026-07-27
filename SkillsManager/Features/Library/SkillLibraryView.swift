@@ -4,30 +4,19 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct SkillLibraryView: View {
-    private enum DirectoryImportPurpose {
-        case add(SkillAgent)
-        case relocate(SkillSource.ID)
-    }
-
     @Bindable var model: SkillLibraryModel
     @Bindable var catalogModel: SkillCatalogModel
     @State private var isChoosingDirectory = false
-    @State private var directoryImportPurpose = DirectoryImportPurpose.add(.other)
-    @State private var directoryDialogDefaultDirectory: URL?
+    @State private var sourceBeingRelocated: SkillSource.ID?
     @State private var isShowingCatalog = false
 
     var body: some View {
         NavigationSplitView {
             SkillSourceSidebar(model: model) { sourceID in
-                chooseDirectory(for: .relocate(sourceID))
+                chooseDirectory(for: sourceID)
             }
         } content: {
-            SkillList(model: model) { agent, defaultDirectory in
-                chooseDirectory(
-                    for: .add(agent),
-                    defaultDirectory: defaultDirectory
-                )
-            }
+            SkillList(model: model)
         } detail: {
             SkillDetail(model: model)
         }
@@ -59,15 +48,8 @@ struct SkillLibraryView: View {
                 .help("Sort skills by name, date added, or agent")
             }
 
-            ToolbarItem {
-                SettingsLink {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .help("Open Skills Manager settings")
-            }
-
             ToolbarItem(placement: .primaryAction) {
-                addDirectoryButton
+                settingsButton
             }
         }
         .fileImporter(
@@ -76,7 +58,6 @@ struct SkillLibraryView: View {
             allowsMultipleSelection: false,
             onCompletion: handleDirectoryImport
         )
-        .fileDialogDefaultDirectory(directoryDialogDefaultDirectory)
         .alert(item: $model.presentedError) { error in
             Alert(
                 title: Text(error.title),
@@ -97,40 +78,32 @@ struct SkillLibraryView: View {
     }
 
     @ViewBuilder
-    private var addDirectoryButton: some View {
+    private var settingsButton: some View {
         if #available(macOS 26.0, *) {
-            addDirectoryMenu
+            settingsLink
                 .buttonStyle(.glassProminent)
         } else {
-            addDirectoryMenu
+            settingsLink
                 .buttonStyle(.borderedProminent)
         }
     }
 
-    private var addDirectoryMenu: some View {
-        Menu("Add Directory", systemImage: "folder.badge.plus") {
-            AgentDirectoryMenuContent { agent, defaultDirectory in
-                chooseDirectory(
-                    for: .add(agent),
-                    defaultDirectory: defaultDirectory
-                )
-            }
+    private var settingsLink: some View {
+        SettingsLink {
+            Label("Settings", systemImage: "gearshape")
         }
-        .labelStyle(.titleAndIcon)
-        .help("Add a directory that contains an agent’s skills")
+        .help("Manage skill folders and app settings")
     }
 
-    private func chooseDirectory(
-        for purpose: DirectoryImportPurpose,
-        defaultDirectory: URL? = nil
-    ) {
-        directoryImportPurpose = purpose
-        directoryDialogDefaultDirectory = defaultDirectory
+    private func chooseDirectory(for sourceID: SkillSource.ID) {
+        sourceBeingRelocated = sourceID
         isChoosingDirectory = true
     }
 
     private func handleDirectoryImport(_ result: Result<[URL], any Error>) {
-        let purpose = directoryImportPurpose
+        guard let sourceID = sourceBeingRelocated else {
+            return
+        }
 
         Task { @MainActor in
             do {
@@ -138,62 +111,10 @@ struct SkillLibraryView: View {
                     return
                 }
 
-                switch purpose {
-                case .add(let agent):
-                    try await model.addSource(at: directoryURL, agent: agent)
-                case .relocate(let sourceID):
-                    try await model.relocateSource(sourceID, to: directoryURL)
-                }
+                try await model.relocateSource(sourceID, to: directoryURL)
             } catch {
-                let title =
-                    switch purpose {
-                    case .add:
-                        "Unable to Add Directory"
-                    case .relocate:
-                        "Unable to Relocate Directory"
-                    }
-                model.report(error, title: title)
+                model.report(error, title: "Unable to Relocate Directory")
             }
-        }
-    }
-}
-
-struct AgentDirectoryMenuContent: View {
-    let chooseDirectory: (SkillAgent, URL?) -> Void
-    var homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
-    var body: some View {
-        Section("Suggested Locations") {
-            ForEach(agentsWithDefaultDirectory) { agent in
-                if let relativePath = agent.defaultSkillsDirectoryRelativePath {
-                    Button {
-                        chooseDirectory(
-                            agent,
-                            agent.defaultSkillsDirectory(in: homeDirectory)
-                        )
-                    } label: {
-                        Label(
-                            "\(agent.displayName) — ~/\(relativePath)",
-                            systemImage: agent.systemImage
-                        )
-                    }
-                }
-            }
-        }
-
-        Section("Choose Another Location") {
-            ForEach(SkillAgent.allCases) { agent in
-                Button {
-                    chooseDirectory(agent, nil)
-                } label: {
-                    Label(agent.displayName, systemImage: agent.systemImage)
-                }
-            }
-        }
-    }
-
-    private var agentsWithDefaultDirectory: [SkillAgent] {
-        SkillAgent.allCases.filter {
-            $0.defaultSkillsDirectoryRelativePath != nil
         }
     }
 }

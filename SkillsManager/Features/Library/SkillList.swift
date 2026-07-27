@@ -4,7 +4,6 @@ import SwiftUI
 
 struct SkillList: View {
     @Bindable var model: SkillLibraryModel
-    let addDirectory: (SkillAgent, URL?) -> Void
     @State private var skillIDsPendingRemoval: Set<AgentSkill.ID> = []
 
     var body: some View {
@@ -65,11 +64,10 @@ struct SkillList: View {
             Text(emptyContent.description)
         } actions: {
             switch emptyContent.action {
-            case .addDirectory:
-                Menu("Add Agent Directory", systemImage: "folder.badge.plus") {
-                    AgentDirectoryMenuContent(chooseDirectory: addDirectory)
+            case .manageFolders:
+                SettingsLink {
+                    Label("Manage Folders", systemImage: "gearshape")
                 }
-                .menuStyle(.button)
                 .buttonStyle(.borderedProminent)
             case .rescan(let sourceID):
                 Button("Rescan") {
@@ -172,8 +170,8 @@ struct SkillList: View {
             return EmptyContent(
                 title: "Build Your Skill Library",
                 systemImage: "sparkles",
-                description: "Add a directory to start managing skills.",
-                action: .addDirectory
+                description: "Add a skill folder in Settings to start managing skills.",
+                action: .manageFolders
             )
         }
 
@@ -229,8 +227,8 @@ struct SkillList: View {
             return EmptyContent(
                 title: "No Skills Found",
                 systemImage: "wand.and.stars",
-                description: "Add a directory or rescan an existing one.",
-                action: .addDirectory
+                description: "Add a folder in Settings or rescan an existing one.",
+                action: .manageFolders
             )
         }
     }
@@ -320,7 +318,7 @@ private struct SkillRow: View {
 
 private struct EmptyContent {
     enum Action {
-        case addDirectory
+        case manageFolders
         case rescan(SkillSource.ID)
         case searchAll
     }
