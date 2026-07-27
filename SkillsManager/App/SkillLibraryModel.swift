@@ -17,7 +17,7 @@ final class SkillLibraryModel {
         let message: String
     }
 
-    private enum SourceRecoveryError: LocalizedError {
+    enum SourceRecoveryError: LocalizedError, Equatable {
         case accessDenied
 
         var errorDescription: String? {
