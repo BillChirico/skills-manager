@@ -8,11 +8,20 @@ The current product surface includes:
 - a SwiftUI three-column library with smart groups, scoped search, multi-select,
   detail tabs, and recovery-focused empty states;
 - persistent user-selected directories backed by security-scoped bookmarks;
+- per-directory agent assignments for Claude Code, Codex, Cursor, Gemini,
+  GitHub Copilot, and other tools;
 - local `SKILL.md` discovery with stable skill identities across rescans;
-- directory rename, enable, rescan, reveal, and remove controls;
+- skills.sh search and one-click installation for GitHub-backed catalog skills;
+- name, date-added, and agent sorting, with the agent and source shown on every
+  skill row;
+- right-click actions for updating, enabling, revealing, opening, copying the
+  path of, and removing a skill;
+- directory rename, agent assignment, enable, rescan, reveal, and remove
+  controls;
+- Settings access from the toolbar and the standard app menu;
 - independent enabled and update-availability state for each skill;
 - a reusable `SkillsCore` Swift package for discovery, persistence, models,
-  filtering, and search;
+  filtering, search, catalog access, and safe package installation;
 - Swift Testing coverage for the core package and app state;
 - an XcodeGen project specification and generated Xcode project; and
 - contributor and AI-agent guidance.
@@ -56,6 +65,17 @@ make check
 full Xcode app. `make build` and the app unit tests require Xcode. Swift sources
 are formatted with the `swift format` command included in the Swift toolchain;
 run `make lint` for a non-mutating style check.
+
+## Catalog installation
+
+The Discover Skills window searches skills.sh after two or more characters.
+GitHub-backed results can be installed into any enabled, available agent
+directory. Installation downloads only the selected skill directory, validates
+every relative path, caps package size and file count, stages the files before
+moving them into place, and never replaces an existing directory.
+
+Skills are copied as data and are not executed during installation. Review a
+skill on skills.sh or inspect its files before using it with an agent.
 
 ## Repository layout
 
