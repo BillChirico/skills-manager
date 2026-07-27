@@ -1,5 +1,11 @@
 # Folder Management Settings Design
 
+> **Review note:** The post-merge interaction and visual refinements are
+> specified in
+> `2026-07-27-folder-settings-review-followup-design.md`. That follow-up
+> supersedes this document where selection, toolbar hierarchy, row state, or
+> Settings presentation differ.
+
 ## Goal
 
 Move folder addition into Settings and give users a native macOS folder list
