@@ -291,6 +291,79 @@ struct FolderSettingsSelection {
     }
 }
 
+@MainActor
+struct FolderSettingsRowPresentation {
+    let displayPath: String
+    let statusText: String?
+    let statusSystemImage: String?
+    let showsReconnectAction: Bool
+    let stateAccessibilityLabel: String
+    let toggleAccessibilityLabel: String
+    let reconnectAccessibilityLabel: String
+
+    init(
+        source: SkillSource,
+        state: SkillLibraryModel.SourceState,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) {
+        displayPath = Self.displayPath(
+            for: source.directoryURL,
+            homeDirectory: homeDirectory
+        )
+        toggleAccessibilityLabel = "Enable \(source.displayName)"
+        reconnectAccessibilityLabel = "Reconnect \(source.displayName)"
+
+        switch state {
+        case .available where source.isEnabled:
+            statusText = nil
+            statusSystemImage = nil
+            showsReconnectAction = false
+            stateAccessibilityLabel = "Available"
+        case .available:
+            statusText = "Paused"
+            statusSystemImage = "pause.circle"
+            showsReconnectAction = false
+            stateAccessibilityLabel = "Paused"
+        case .scanning:
+            statusText = "Scanning…"
+            statusSystemImage = nil
+            showsReconnectAction = false
+            stateAccessibilityLabel = "Scanning"
+        case .unavailable:
+            statusText = "Missing"
+            statusSystemImage = "exclamationmark.triangle.fill"
+            showsReconnectAction = true
+            stateAccessibilityLabel = "Missing. Reconnect available."
+        }
+    }
+
+    private static func displayPath(
+        for directoryURL: URL,
+        homeDirectory: URL
+    ) -> String {
+        let path = trimmedPath(directoryURL.path(percentEncoded: false))
+        let homePath = trimmedPath(homeDirectory.path(percentEncoded: false))
+
+        if path == homePath {
+            return "~"
+        }
+
+        if path.hasPrefix("\(homePath)/") {
+            return "~\(path.dropFirst(homePath.count))"
+        }
+
+        return path
+    }
+
+    private static func trimmedPath(_ path: String) -> String {
+        guard path != "/" else {
+            return path
+        }
+
+        return path.replacing(/\/+$/, with: "")
+    }
+}
+
 struct AgentDirectoryMenuContent: View {
     let chooseDirectory: (SkillAgent, URL?) -> Void
     var homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser

@@ -45,3 +45,89 @@ struct FolderSettingsSelectionTests {
         )
     }
 }
+
+@MainActor
+struct FolderSettingsRowPresentationTests {
+    private let homeDirectory = URL(
+        filePath: "/Users/reviewer",
+        directoryHint: .isDirectory
+    )
+
+    @Test("An enabled healthy row has no decorative visible status")
+    func healthyStateIsQuietAndAccessible() {
+        let source = makeSource(
+            name: "Codex",
+            path: "/Users/reviewer/.codex/skills/",
+            isEnabled: true
+        )
+
+        let presentation = FolderSettingsRowPresentation(
+            source: source,
+            state: .available,
+            homeDirectory: homeDirectory
+        )
+
+        #expect(presentation.displayPath == "~/.codex/skills")
+        #expect(presentation.statusText == nil)
+        #expect(presentation.statusSystemImage == nil)
+        #expect(presentation.showsReconnectAction == false)
+        #expect(presentation.stateAccessibilityLabel == "Available")
+        #expect(presentation.toggleAccessibilityLabel == "Enable Codex")
+        #expect(presentation.reconnectAccessibilityLabel == "Reconnect Codex")
+    }
+
+    @Test("A disabled row names its paused state without hiding its controls")
+    func pausedStateUsesTextAndAccessibleControls() {
+        let source = makeSource(
+            name: "Claude",
+            path: "/Users/reviewer/.claude/skills",
+            isEnabled: false
+        )
+
+        let presentation = FolderSettingsRowPresentation(
+            source: source,
+            state: .available,
+            homeDirectory: homeDirectory
+        )
+
+        #expect(presentation.statusText == "Paused")
+        #expect(presentation.statusSystemImage == "pause.circle")
+        #expect(presentation.showsReconnectAction == false)
+        #expect(presentation.stateAccessibilityLabel == "Paused")
+        #expect(presentation.toggleAccessibilityLabel == "Enable Claude")
+    }
+
+    @Test("An unavailable row exposes a named reconnect action")
+    func unavailableStateExposesReconnect() {
+        let source = makeSource(
+            name: "Team Skills",
+            path: "/Volumes/Team/Skills/",
+            isEnabled: true
+        )
+
+        let presentation = FolderSettingsRowPresentation(
+            source: source,
+            state: .unavailable,
+            homeDirectory: homeDirectory
+        )
+
+        #expect(presentation.displayPath == "/Volumes/Team/Skills")
+        #expect(presentation.statusText == "Missing")
+        #expect(presentation.statusSystemImage == "exclamationmark.triangle.fill")
+        #expect(presentation.showsReconnectAction)
+        #expect(presentation.stateAccessibilityLabel == "Missing. Reconnect available.")
+        #expect(presentation.reconnectAccessibilityLabel == "Reconnect Team Skills")
+    }
+
+    private func makeSource(
+        name: String,
+        path: String,
+        isEnabled: Bool
+    ) -> SkillSource {
+        SkillSource(
+            name: name,
+            directoryURL: URL(filePath: path, directoryHint: .isDirectory),
+            isEnabled: isEnabled
+        )
+    }
+}
