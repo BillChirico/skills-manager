@@ -46,3 +46,17 @@ struct SettingsView: View {
         .frame(width: 560, height: 360)
     }
 }
+
+struct FolderSettingsSelection {
+    var sourceID: SkillSource.ID?
+
+    mutating func reconcile(with sources: [SkillSource]) {
+        guard
+            let sourceID,
+            sources.contains(where: { $0.id == sourceID })
+        else {
+            sourceID = sources.first?.id
+            return
+        }
+    }
+}
