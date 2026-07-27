@@ -202,7 +202,7 @@ git commit -m "docs: describe settings folder management"
 - Consumes: all prior tasks.
 - Produces: passing checks, a native Settings screenshot, and PR-ready evidence.
 
-- [ ] **Step 1: Run repository checks**
+- [x] **Step 1: Run repository checks**
 
 Run:
 
@@ -213,25 +213,25 @@ make check
 Expected: project generation is stable, formatting passes, package and app
 tests pass, and the generated project has no diff.
 
-- [ ] **Step 2: Launch with isolated app data**
+- [x] **Step 2: Launch with isolated app data**
 
 Build without signing, launch the Debug app with a task-specific
 `CFFIXED_USER_HOME`, and open Settings through the gear toolbar button.
 
-- [ ] **Step 3: Exercise add and remove**
+- [x] **Step 3: Exercise add and remove**
 
 Use the plus menu and system picker to add a harmless repository test folder.
 Verify its row appears with the full path and correct agent, select it, use
 minus, confirm removal, and verify the row disappears while the directory
 remains on disk.
 
-- [ ] **Step 4: Review the rendered UI**
+- [x] **Step 4: Review the rendered UI**
 
 Capture the Settings window and check hierarchy, row readability, selection,
 status affordances, plus/minus discoverability, keyboard focus, contrast, and
 the macOS 26 Liquid Glass treatment or macOS 15–25 material fallback.
 
-- [ ] **Step 5: Prepare the linked pull request**
+- [x] **Step 5: Prepare the linked pull request**
 
 Push the branch and create a PR titled
 `VOLVOX-11: move folder management to Settings` with `Closes VOLVOX-11` in the
