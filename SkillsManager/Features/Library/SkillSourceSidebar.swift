@@ -42,7 +42,7 @@ struct SkillSourceSidebar: View {
                 .tag(SkillLibraryScope.recentlyAdded)
             }
 
-            Section("Directories") {
+            Section("Agent Directories") {
                 if model.sources.isEmpty {
                     Text("No directories added")
                         .foregroundStyle(.secondary)
@@ -146,12 +146,19 @@ struct SkillSourceSidebar: View {
 
     private func sourceRow(_ source: SkillSource) -> some View {
         HStack(spacing: SkillsManagerSpacing.small) {
-            Image(systemName: "folder")
+            Image(systemName: source.agent.systemImage)
                 .foregroundStyle(.secondary)
+                .frame(width: 18)
                 .accessibilityHidden(true)
 
-            Text(source.displayName)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(source.displayName)
+                    .lineLimit(1)
+                Text(source.agent.displayName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
 
             Spacer(minLength: SkillsManagerSpacing.small)
 
@@ -202,6 +209,22 @@ struct SkillSourceSidebar: View {
         Button("Rename…", systemImage: "pencil") {
             renamedSourceName = source.displayName
             sourceBeingRenamed = source
+        }
+
+        Menu("Assign to Agent", systemImage: "person.crop.circle") {
+            ForEach(SkillAgent.allCases) { agent in
+                Button {
+                    perform("Unable to Update Agent") {
+                        try await model.setSourceAgent(agent, sourceID: source.id)
+                    }
+                } label: {
+                    if source.agent == agent {
+                        Label(agent.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(agent.displayName)
+                    }
+                }
+            }
         }
 
         Divider()

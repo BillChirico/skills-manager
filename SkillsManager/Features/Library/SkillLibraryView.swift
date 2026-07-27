@@ -1,16 +1,20 @@
+import Foundation
 import SkillsCore
 import SwiftUI
 import UniformTypeIdentifiers
 
 struct SkillLibraryView: View {
     private enum DirectoryImportPurpose {
-        case add
+        case add(SkillAgent)
         case relocate(SkillSource.ID)
     }
 
     @Bindable var model: SkillLibraryModel
+    @Bindable var catalogModel: SkillCatalogModel
     @State private var isChoosingDirectory = false
-    @State private var directoryImportPurpose = DirectoryImportPurpose.add
+    @State private var directoryImportPurpose = DirectoryImportPurpose.add(.other)
+    @State private var directoryDialogDefaultDirectory: URL?
+    @State private var isShowingCatalog = false
 
     var body: some View {
         NavigationSplitView {
@@ -18,8 +22,11 @@ struct SkillLibraryView: View {
                 chooseDirectory(for: .relocate(sourceID))
             }
         } content: {
-            SkillList(model: model) {
-                chooseDirectory(for: .add)
+            SkillList(model: model) { agent, defaultDirectory in
+                chooseDirectory(
+                    for: .add(agent),
+                    defaultDirectory: defaultDirectory
+                )
             }
         } detail: {
             SkillDetail(model: model)
@@ -31,16 +38,45 @@ struct SkillLibraryView: View {
             prompt: model.searchPrompt
         )
         .toolbar {
+            ToolbarItem {
+                Button("Discover Skills", systemImage: "globe") {
+                    isShowingCatalog = true
+                }
+                .help("Search and install skills from skills.sh")
+            }
+
+            ToolbarItem {
+                Menu {
+                    Picker("Sort Skills", selection: $model.sortOrder) {
+                        ForEach(SkillSortOrder.allCases) { order in
+                            Text(order.displayName)
+                                .tag(order)
+                        }
+                    }
+                } label: {
+                    Label("Sort by \(model.sortOrder.displayName)", systemImage: "arrow.up.arrow.down")
+                }
+                .help("Sort skills by name, date added, or agent")
+            }
+
+            ToolbarItem {
+                SettingsLink {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .help("Open Skills Manager settings")
+            }
+
             ToolbarItem(placement: .primaryAction) {
                 addDirectoryButton
             }
         }
         .fileImporter(
             isPresented: $isChoosingDirectory,
-            allowedContentTypes: [.folder],
+            allowedContentTypes: [.directory],
             allowsMultipleSelection: false,
             onCompletion: handleDirectoryImport
         )
+        .fileDialogDefaultDirectory(directoryDialogDefaultDirectory)
         .alert(item: $model.presentedError) { error in
             Alert(
                 title: Text(error.title),
@@ -51,29 +87,45 @@ struct SkillLibraryView: View {
         .task {
             await model.restoreSources()
         }
+        .sheet(isPresented: $isShowingCatalog) {
+            SkillCatalogView(
+                catalogModel: catalogModel,
+                libraryModel: model
+            )
+            .frame(minWidth: 820, minHeight: 580)
+        }
     }
 
     @ViewBuilder
     private var addDirectoryButton: some View {
         if #available(macOS 26.0, *) {
-            Button("Add Directory", systemImage: "plus") {
-                chooseDirectory(for: .add)
-            }
-            .buttonStyle(.glassProminent)
-            .labelStyle(.titleAndIcon)
-            .help("Add a directory that contains agent skills")
+            addDirectoryMenu
+                .buttonStyle(.glassProminent)
         } else {
-            Button("Add Directory", systemImage: "plus") {
-                chooseDirectory(for: .add)
-            }
-            .buttonStyle(.borderedProminent)
-            .labelStyle(.titleAndIcon)
-            .help("Add a directory that contains agent skills")
+            addDirectoryMenu
+                .buttonStyle(.borderedProminent)
         }
     }
 
-    private func chooseDirectory(for purpose: DirectoryImportPurpose) {
+    private var addDirectoryMenu: some View {
+        Menu("Add Directory", systemImage: "folder.badge.plus") {
+            AgentDirectoryMenuContent { agent, defaultDirectory in
+                chooseDirectory(
+                    for: .add(agent),
+                    defaultDirectory: defaultDirectory
+                )
+            }
+        }
+        .labelStyle(.titleAndIcon)
+        .help("Add a directory that contains an agent’s skills")
+    }
+
+    private func chooseDirectory(
+        for purpose: DirectoryImportPurpose,
+        defaultDirectory: URL? = nil
+    ) {
         directoryImportPurpose = purpose
+        directoryDialogDefaultDirectory = defaultDirectory
         isChoosingDirectory = true
     }
 
@@ -87,8 +139,8 @@ struct SkillLibraryView: View {
                 }
 
                 switch purpose {
-                case .add:
-                    try await model.addSource(at: directoryURL)
+                case .add(let agent):
+                    try await model.addSource(at: directoryURL, agent: agent)
                 case .relocate(let sourceID):
                     try await model.relocateSource(sourceID, to: directoryURL)
                 }
@@ -102,6 +154,46 @@ struct SkillLibraryView: View {
                     }
                 model.report(error, title: title)
             }
+        }
+    }
+}
+
+struct AgentDirectoryMenuContent: View {
+    let chooseDirectory: (SkillAgent, URL?) -> Void
+    var homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    var body: some View {
+        Section("Suggested Locations") {
+            ForEach(agentsWithDefaultDirectory) { agent in
+                if let relativePath = agent.defaultSkillsDirectoryRelativePath {
+                    Button {
+                        chooseDirectory(
+                            agent,
+                            agent.defaultSkillsDirectory(in: homeDirectory)
+                        )
+                    } label: {
+                        Label(
+                            "\(agent.displayName) — ~/\(relativePath)",
+                            systemImage: agent.systemImage
+                        )
+                    }
+                }
+            }
+        }
+
+        Section("Choose Another Location") {
+            ForEach(SkillAgent.allCases) { agent in
+                Button {
+                    chooseDirectory(agent, nil)
+                } label: {
+                    Label(agent.displayName, systemImage: agent.systemImage)
+                }
+            }
+        }
+    }
+
+    private var agentsWithDefaultDirectory: [SkillAgent] {
+        SkillAgent.allCases.filter {
+            $0.defaultSkillsDirectoryRelativePath != nil
         }
     }
 }

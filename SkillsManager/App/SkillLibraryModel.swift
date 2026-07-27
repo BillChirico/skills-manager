@@ -17,7 +17,7 @@ final class SkillLibraryModel {
         let message: String
     }
 
-    enum SourceRecoveryError: LocalizedError, Equatable {
+    private enum SourceAccessError: LocalizedError {
         case accessDenied
 
         var errorDescription: String? {
@@ -37,6 +37,7 @@ final class SkillLibraryModel {
     }
     var selectedSkillIDs: Set<AgentSkill.ID>
     var searchText = ""
+    var sortOrder: SkillSortOrder
     var presentedError: PresentedError?
 
     @ObservationIgnored private let sourceStore: (any SkillSourceStore)?
@@ -53,6 +54,7 @@ final class SkillLibraryModel {
         discoverer: (any SkillDiscovering)? = nil,
         bookmarker: (any SkillSourceBookmarking)? = nil,
         sourceAccess: (any SkillSourceAccessing)? = nil,
+        sortOrder: SkillSortOrder = .name,
         now: @escaping () -> Date = { .now }
     ) {
         let sortedSources = Self.sortedSources(sources)
@@ -68,6 +70,7 @@ final class SkillLibraryModel {
         )
         self.sidebarSelection = .allSkills
         self.selectedSkillIDs = []
+        self.sortOrder = sortOrder
     }
 
     var visibleSkills: [AgentSkill] {
@@ -131,6 +134,10 @@ final class SkillLibraryModel {
 
     func sourceName(for skill: AgentSkill) -> String {
         source(for: skill.sourceID)?.displayName ?? "Unknown Directory"
+    }
+
+    func agentName(for skill: AgentSkill) -> String {
+        source(for: skill.sourceID)?.agent.displayName ?? SkillAgent.other.displayName
     }
 
     func sourceState(for sourceID: SkillSource.ID) -> SourceState {
@@ -210,7 +217,10 @@ final class SkillLibraryModel {
         }
     }
 
-    func addSource(at directoryURL: URL) async throws {
+    func addSource(
+        at directoryURL: URL,
+        agent: SkillAgent = .other
+    ) async throws {
         let normalizedURL = directoryURL.standardizedFileURL
 
         if let existingSource = sources.first(where: {
@@ -223,17 +233,28 @@ final class SkillLibraryModel {
             return
         }
 
-        let source = SkillSource(
+        var source = SkillSource(
             name: normalizedURL.lastPathComponent,
             directoryURL: normalizedURL,
-            bookmarkData: try bookmarker?.makeBookmark(for: normalizedURL)
+            agent: agent
         )
         let accessGranted =
             sourceAccess?.beginAccessing(normalizedURL, for: source.id) ?? true
 
+        guard accessGranted else {
+            throw SourceAccessError.accessDenied
+        }
+
+        do {
+            source.bookmarkData = try bookmarker?.makeBookmark(for: normalizedURL)
+        } catch {
+            sourceAccess?.stopAccessing(sourceID: source.id)
+            throw error
+        }
+
         sources.append(source)
         sources = Self.sortedSources(sources)
-        sourceStates[source.id] = accessGranted ? .available : .unavailable
+        sourceStates[source.id] = .available
         sidebarSelection = .source(source.id)
 
         do {
@@ -246,7 +267,7 @@ final class SkillLibraryModel {
             throw error
         }
 
-        if accessGranted, discoverer != nil {
+        if discoverer != nil {
             do {
                 try await rescanSource(source.id)
             } catch {
@@ -278,6 +299,27 @@ final class SkillLibraryModel {
                 throw error
             }
             sources[rollbackIndex].name = previousName
+            sources = Self.sortedSources(sources)
+            throw error
+        }
+    }
+
+    func setSourceAgent(_ agent: SkillAgent, sourceID: SkillSource.ID) async throws {
+        guard let index = sources.firstIndex(where: { $0.id == sourceID }) else {
+            return
+        }
+
+        let previousAgent = sources[index].agent
+        sources[index].agent = agent
+        sources = Self.sortedSources(sources)
+
+        do {
+            try await persistSources()
+        } catch {
+            guard let rollbackIndex = sources.firstIndex(where: { $0.id == sourceID }) else {
+                throw error
+            }
+            sources[rollbackIndex].agent = previousAgent
             sources = Self.sortedSources(sources)
             throw error
         }
@@ -397,6 +439,20 @@ final class SkillLibraryModel {
         selectedSkillIDs.subtract(skillIDs)
     }
 
+    func selectSkill(at directoryURL: URL, sourceID: SkillSource.ID) {
+        guard
+            let skill = skills.first(where: {
+                $0.sourceID == sourceID
+                    && $0.directoryURL.standardizedFileURL == directoryURL.standardizedFileURL
+            })
+        else {
+            return
+        }
+
+        sidebarSelection = .source(sourceID)
+        selectedSkillIDs = [skill.id]
+    }
+
     func report(_ error: any Error, title: String) {
         presentedError = PresentedError(
             title: title,
@@ -417,7 +473,8 @@ final class SkillLibraryModel {
             sources: sources,
             scope: scope,
             query: query,
-            recentCutoff: recentCutoff
+            recentCutoff: recentCutoff,
+            sortOrder: sortOrder
         )
     }
 
@@ -435,19 +492,20 @@ final class SkillLibraryModel {
 
         let previousSource = sources[sourceIndex]
         let previousState = sourceStates[sourceID]
-        let bookmarkData = try bookmarker?.makeBookmark(for: directoryURL)
         let accessGranted =
             sourceAccess?.beginAccessing(directoryURL, for: sourceID) ?? true
 
         guard accessGranted else {
-            if previousState == .available,
-                sourceAccess?.beginAccessing(previousSource.directoryURL, for: sourceID) == true
-            {
-                sourceStates[sourceID] = .available
-            } else {
-                sourceStates[sourceID] = .unavailable
-            }
-            throw SourceRecoveryError.accessDenied
+            restoreSourceAccess(previousSource, state: previousState)
+            throw SourceAccessError.accessDenied
+        }
+
+        let bookmarkData: Data?
+        do {
+            bookmarkData = try bookmarker?.makeBookmark(for: directoryURL)
+        } catch {
+            restoreSourceAccess(previousSource, state: previousState)
+            throw error
         }
 
         sources[sourceIndex].directoryURL = directoryURL
@@ -463,15 +521,7 @@ final class SkillLibraryModel {
             }
             sources[rollbackIndex] = previousSource
             sources = Self.sortedSources(sources)
-
-            if previousState == .available {
-                let restoredAccess =
-                    sourceAccess?.beginAccessing(previousSource.directoryURL, for: sourceID)
-                sourceStates[sourceID] = restoredAccess == false ? .unavailable : previousState
-            } else {
-                sourceAccess?.stopAccessing(sourceID: sourceID)
-                sourceStates[sourceID] = previousState
-            }
+            restoreSourceAccess(previousSource, state: previousState)
             throw error
         }
 
@@ -489,6 +539,20 @@ final class SkillLibraryModel {
         }
     }
 
+    private func restoreSourceAccess(
+        _ source: SkillSource,
+        state previousState: SourceState?
+    ) {
+        if previousState == .available {
+            let restoredAccess =
+                sourceAccess?.beginAccessing(source.directoryURL, for: source.id)
+            sourceStates[source.id] = restoredAccess == false ? .unavailable : .available
+        } else {
+            sourceAccess?.stopAccessing(sourceID: source.id)
+            sourceStates[source.id] = previousState
+        }
+    }
+
     private func reconcileSelection() {
         let availableIDs = Set(skills.map(\.id))
         selectedSkillIDs.formIntersection(availableIDs)
@@ -501,7 +565,14 @@ final class SkillLibraryModel {
         }
 
         return sourcesByID.values.sorted {
-            $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+            let agentComparison = $0.agent.displayName.localizedStandardCompare(
+                $1.agent.displayName
+            )
+            if agentComparison != .orderedSame {
+                return agentComparison == .orderedAscending
+            }
+
+            return $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
         }
     }
 
