@@ -52,8 +52,7 @@ public struct SkillsShCatalogClient: SkillCatalogSearching {
     /// unexpected response, and either way the extra entries are dropped.
     private static let maximumPageSize = 200
 
-    /// A ceiling checked before JSON decoding to bound decoder work. The default URLSession
-    /// loader buffers the response before this check; streaming limits are future hardening.
+    /// A streaming ceiling that bounds both retained response data and JSON decoder work.
     private static let maximumResponseSize = 8 * 1_024 * 1_024
 
     private let baseURL: URL
@@ -166,7 +165,15 @@ public struct SkillsShCatalogClient: SkillCatalogSearching {
     private func validatedData(for url: URL) async throws -> Data {
         var request = URLRequest(url: url)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let response = try await dataLoader.data(for: request)
+        let response: HTTPDataResponse
+        do {
+            response = try await dataLoader.data(
+                for: request,
+                maximumBytes: Self.maximumResponseSize
+            )
+        } catch HTTPDataLoadingError.responseTooLarge {
+            throw SkillsShCatalogError.responseTooLarge
+        }
 
         switch response.statusCode {
         case 200:

@@ -177,7 +177,7 @@ struct SkillDetail: View {
         switch selectedTab {
         case .overview:
             VStack(alignment: .leading, spacing: SkillsManagerSpacing.extraLarge) {
-                Text(attributedOverview(for: skill))
+                Text(skill.attributedOverview)
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .lineSpacing(3)
@@ -262,11 +262,6 @@ struct SkillDetail: View {
             )
             .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
         }
-    }
-
-    private func attributedOverview(for skill: AgentSkill) -> AttributedString {
-        (try? AttributedString(markdown: skill.overview))
-            ?? AttributedString(skill.overview)
     }
 
     private func metadataRow(

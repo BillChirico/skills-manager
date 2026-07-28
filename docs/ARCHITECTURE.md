@@ -69,9 +69,11 @@ The skills.sh client uses two public endpoints. `/api/search` answers queries of
 at least two characters, and `/api/skills/all-time/{page}` returns the download
 leaderboard a page at a time. The leaderboard omits the `id` the search endpoint
 reports, so the client composes it from `source` and `skillId` and drops any
-entry missing either. Both responses are size-checked before JSON decoding to
-bound decoder work. The default URLSession loader buffers a response before that
-check; enforcing the ceiling while streaming is a future hardening opportunity.
+entry missing either. Both responses are capped at 8 MiB before JSON decoding.
+The production HTTP loader enforces a caller-supplied byte ceiling while it
+streams the body, so it stops consuming an oversized response before retaining
+the entire payload. Callers retain their own size checks at the decoding
+boundary so custom and test loaders cannot bypass the policy.
 
 Search results arrive in relevance order, so `CatalogSkillSorter.byDownloads`
 imposes the download ranking the product presents. It is applied in the app's
@@ -83,16 +85,30 @@ so repeated responses render identically.
 from search results, so clearing the search field falls back to the cached list
 instead of an empty screen or a refetch.
 
-The GitHub fetcher resolves the selected skill directory from the repository tree
-and downloads only blob entries beneath it. A non-GitHub source remains browsable
-but is not installable.
+For each installation, the GitHub fetcher resolves `HEAD` once to a commit SHA,
+uses that SHA to enumerate the repository tree, and reuses it in every
+`raw.githubusercontent.com` URL. This avoids mixing a tree from one revision
+with files from another when the default branch moves during a download. The
+recursive tree response has an 8 MiB streaming ceiling, and truncated trees are
+rejected.
+
+Manifest selection is tied to the catalog slug. A nested `SKILL.md` matches only
+when its immediate parent directory has the requested slug. A repository-root
+`SKILL.md` is accepted only when it is the sole manifest in the tree and the
+validated repository name exactly equals the requested slug. A missing or
+mismatched manifest fails closed instead of falling back to an unrelated root
+or nested skill. Once selected, the fetcher downloads only blob entries beneath
+that manifest's directory. A non-GitHub source remains browsable but is not
+installable.
 
 Before writing, the installer validates the directory name and each path,
 rejects traversal, duplicate paths, and missing manifests, and refuses to
 overwrite an existing skill. Packages are limited to 200 files and 10 MiB,
-assembled in memory, written to a staging directory, then moved into place.
-This prevents a failed download or validation pass from leaving a partial
-installed skill.
+assembled in memory, written to a staging directory, then moved into place. The
+fetcher passes the remaining aggregate budget as the ceiling for each raw-file
+stream, so an oversized first file or a later file that would cross 10 MiB is
+stopped before the excess response is buffered. This prevents a failed download
+or validation pass from leaving a partial installed skill.
 
 A skill can be installed into several configured directories at once. The model
 fetches the package a single time and then writes it per destination, returning
@@ -119,6 +135,12 @@ Repository tree paths get the same treatment: `GitHubSkillPackageFetcher` drops
 any entry with an empty, `.`, or `..` component before it reaches a raw-content
 URL, so the fetch side is protected as well as the write side.
 
+Installed manifests are untrusted presentation input too. The library overview
+renders the extracted `SKILL.md` text without active link attributes, so a
+Markdown destination cannot turn arbitrary schemes into clickable app chrome.
+Intentional navigation remains a separate, validated UI action rather than an
+attribute supplied by the manifest.
+
 `SkillInstallCommand` models the `npx skills add …` line that skills.sh prints at
 the top of a skill page. It is rebuilt locally from validated fields rather than
 scraped, and it is stored as a program plus an argument vector, not an
@@ -129,6 +151,9 @@ remote npm code and without writing outside the sandbox's user-selected grants.
 That install-time boundary does not make a third-party skill inert forever:
 `SKILL.md` is instructions that a configured agent may later follow with that
 agent's own permissions, so the product directs users to review it before use.
+Streaming ceilings bound resource use, and a pinned commit makes one package
+fetch internally consistent; neither control authenticates the publisher or
+establishes that the instructions are trustworthy.
 
 ## Platform and visual policy
 

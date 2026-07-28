@@ -88,9 +88,19 @@ GitHub-backed results can be installed into one or many enabled, available agent
 directories. Selecting several directories downloads the package once and copies
 it into each of them; one directory's failure does not stop the others, and the
 per-directory outcome is reported. Installation downloads only the selected skill
-directory, validates every relative path, caps package size and file count,
-stages the files before moving them into place, and never replaces an existing
-directory.
+directory, validates every relative path, caps the package at 200 files and
+10 MiB, stages the files before moving them into place, and never replaces an
+existing directory. Remote responses are limited while they stream instead of
+only after they have been buffered: skills.sh catalog responses are capped at
+8 MiB, the GitHub recursive tree is also capped at 8 MiB, and every raw-file
+request is capped at the package budget that remains.
+
+Each GitHub installation resolves the repository's current `HEAD` to one commit
+SHA, then uses that SHA for both the recursive tree and every raw-file download.
+The requested slug must match the directory containing `SKILL.md`. A
+repository-root manifest is accepted only when it is the repository's sole
+`SKILL.md` and the repository name exactly matches the requested slug; all other
+missing or mismatched manifests fail closed.
 
 ### The install command
 
@@ -114,6 +124,12 @@ The command is rebuilt locally from validated catalog fields rather than scraped
 from the remote page, so the text on screen cannot contain shell metacharacters.
 Dot-prefixed installation slugs are rejected so a catalog entry cannot create a
 hidden directory that Skills Manager's scanner would skip.
+
+Text extracted from an installed `SKILL.md` is also untrusted. The library
+renders its overview as non-interactive text, so Markdown destinations do not
+become clickable links in the app. These presentation and download safeguards
+limit specific attack paths; they do not verify a skill's publisher or make its
+instructions safe. Review the installed manifest before an agent uses it.
 
 ## Directory access
 

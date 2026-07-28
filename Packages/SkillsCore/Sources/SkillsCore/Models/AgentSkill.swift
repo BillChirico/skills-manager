@@ -48,6 +48,18 @@ public struct AgentSkill: Identifiable, Hashable, Codable, Sendable {
         self.lastScannedAt = lastScannedAt
     }
 
+    /// Markdown-styled overview text with every manifest-supplied destination removed.
+    ///
+    /// Installed manifests are untrusted. Preserving inline emphasis is useful, but a link
+    /// must not become an interactive app action merely because it appeared in `SKILL.md`.
+    public var attributedOverview: AttributedString {
+        var attributed =
+            (try? AttributedString(markdown: overview))
+            ?? AttributedString(overview)
+        attributed.link = nil
+        return attributed
+    }
+
     public var hasUpdate: Bool {
         guard let installedVersion, let availableVersion else {
             return false

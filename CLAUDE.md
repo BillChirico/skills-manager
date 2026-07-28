@@ -11,3 +11,5 @@ At a glance:
 - `Packages/SkillsCore/` is the UI-independent domain package.
 - `make test` runs package tests.
 - `make check` is the preferred pre-handoff validation when Xcode is installed.
+- Remote content is untrusted; preserve the bounded-streaming, exact-manifest,
+  commit-pinning, and non-clickable-overview rules in `AGENTS.md`.
