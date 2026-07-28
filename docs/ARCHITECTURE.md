@@ -69,8 +69,9 @@ The skills.sh client uses two public endpoints. `/api/search` answers queries of
 at least two characters, and `/api/skills/all-time/{page}` returns the download
 leaderboard a page at a time. The leaderboard omits the `id` the search endpoint
 reports, so the client composes it from `source` and `skillId` and drops any
-entry missing either. Both responses are capped before decoding so a runaway
-body cannot exhaust memory.
+entry missing either. Both responses are size-checked before JSON decoding to
+bound decoder work. The default URLSession loader buffers a response before that
+check; enforcing the ceiling while streaming is a future hardening opportunity.
 
 Search results arrive in relevance order, so `CatalogSkillSorter.byDownloads`
 imposes the download ranking the product presents. It is applied in the app's
@@ -103,12 +104,16 @@ the destination set.
 
 Every field on `CatalogSkill` comes from skills.sh. `CatalogIdentifier` gates
 each one before it becomes a URL path component or a command argument: values are
-restricted to `[A-Za-z0-9._-]`, length-capped, and rejected when they are `.`,
-`..`, or empty. The argument rule additionally rejects a leading `-`, because a
-slug such as `--force` would otherwise be read as an option. A value that fails
-validation leaves the skill browsable but not installable; there is no
-unvalidated fallback. This is also what keeps a source like `../evil` from
-steering a `api.github.com` or `raw.githubusercontent.com` request off its path.
+restricted to `[A-Za-z0-9._-]`, length-capped, and rejected when they are empty,
+`.`, or `..`. The argument rule additionally rejects a leading `-`, because a slug
+such as `--force` would otherwise be read as an option. The installation-directory
+rule also rejects any leading dot so the scanner cannot lose a newly installed
+hidden skill; safe repository path components such as `.github` remain valid. A
+value that fails install validation leaves the skill browsable but not installable;
+there is no unvalidated fallback. The catalog model re-checks installability before
+it downloads anything, and the filesystem installer independently refuses a hidden
+destination directory. These checks also keep a source like `../evil` from steering
+an `api.github.com` or `raw.githubusercontent.com` request off its path.
 
 Repository tree paths get the same treatment: `GitHubSkillPackageFetcher` drops
 any entry with an empty, `.`, or `..` component before it reaches a raw-content
@@ -121,6 +126,9 @@ interpolated string. Skills Manager displays and copies that command; it never
 runs it. Installing natively performs the same work — the same files over HTTPS,
 copied into user-granted directories — without handing execution to arbitrary
 remote npm code and without writing outside the sandbox's user-selected grants.
+That install-time boundary does not make a third-party skill inert forever:
+`SKILL.md` is instructions that a configured agent may later follow with that
+agent's own permissions, so the product directs users to review it before use.
 
 ## Platform and visual policy
 
@@ -146,8 +154,8 @@ Discover mirrors that split: the result list is a static ranked list on semantic
 list styling, while the install-command block uses a semantic control background
 with a separator stroke rather than Liquid Glass, since it is a static container.
 Directory selection is a checkbox list so several destinations can be chosen at
-once, and it keeps one directory selected so the install action is reachable —
-unlike Settings, where selection stays entirely explicit.
+once. Discover chooses one initial directory so the install action is immediately
+reachable, while still allowing the user to explicitly deselect every directory.
 
 Settings uses a grouped native `Form` and a resizable minimum/ideal frame. Its
 static folder list uses semantic control and separator colors; Liquid Glass is

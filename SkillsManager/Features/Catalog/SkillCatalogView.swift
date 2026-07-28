@@ -10,7 +10,8 @@ struct SkillCatalogView: View {
     @State private var selectedSkillID: CatalogSkill.ID?
     @State private var selectedSourceIDs: Set<SkillSource.ID> = []
     @State private var presentedError: CatalogPresentedError?
-    @State private var didCopyCommand = false
+    @State private var copiedSkillID: CatalogSkill.ID?
+    @State private var isInstallRequestActive = false
 
     var body: some View {
         NavigationSplitView {
@@ -27,13 +28,16 @@ struct SkillCatalogView: View {
             placement: .toolbar,
             prompt: "Search skills.sh"
         )
+        .disabled(isInstallRequestActive)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Done") {
                     dismiss()
                 }
+                .disabled(isInstallRequestActive)
             }
         }
+        .interactiveDismissDisabled(isInstallRequestActive)
         .task {
             await catalogModel.loadTopDownloads()
         }
@@ -64,7 +68,7 @@ struct SkillCatalogView: View {
             }
         }
         .onChange(of: selectedSkillID) {
-            didCopyCommand = false
+            copiedSkillID = nil
         }
         .alert(item: $presentedError) { error in
             Alert(
@@ -79,7 +83,7 @@ struct SkillCatalogView: View {
 
     @ViewBuilder
     private var resultList: some View {
-        if catalogModel.isLoading && catalogModel.results.isEmpty {
+        if catalogModel.isLoading {
             VStack(spacing: SkillsManagerSpacing.large) {
                 ProgressView()
                 Text(
@@ -96,9 +100,13 @@ struct SkillCatalogView: View {
             } description: {
                 Text(error)
             } actions: {
-                if catalogModel.isShowingTopDownloads {
-                    Button("Try Again") {
-                        Task { await catalogModel.refreshTopDownloads() }
+                Button("Try Again") {
+                    Task {
+                        if catalogModel.isShowingTopDownloads {
+                            await catalogModel.refreshTopDownloads()
+                        } else {
+                            await catalogModel.search()
+                        }
                     }
                 }
             }
@@ -117,6 +125,7 @@ struct SkillCatalogView: View {
                 }
             }
             .listStyle(.inset)
+            .disabled(isInstallRequestActive)
         }
     }
 
@@ -138,6 +147,10 @@ struct SkillCatalogView: View {
     }
 
     private var resultSubtitle: String {
+        if catalogModel.isLoading {
+            return catalogModel.isShowingTopDownloads ? "Loading top downloads…" : "Searching…"
+        }
+
         let count = catalogModel.results.count
         guard count > 0 else {
             return catalogModel.isShowingTopDownloads ? "Top downloads" : "No matches"
@@ -210,6 +223,8 @@ struct SkillCatalogView: View {
     @ViewBuilder
     private func installCommandSection(for skill: CatalogSkill) -> some View {
         if let command = skill.installCommand {
+            let didCopyCommand = copiedSkillID == skill.id
+
             VStack(alignment: .leading, spacing: SkillsManagerSpacing.small) {
                 Text("Install Command")
                     .font(.headline)
@@ -221,14 +236,16 @@ struct SkillCatalogView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     Button {
-                        copy(command.displayText)
+                        copy(command.displayText, for: skill.id)
                     } label: {
                         Label(
                             didCopyCommand ? "Copied" : "Copy",
                             systemImage: didCopyCommand ? "checkmark" : "document.on.document"
                         )
                     }
-                    .accessibilityLabel("Copy install command")
+                    .accessibilityLabel(
+                        didCopyCommand ? "Install command copied" : "Copy install command"
+                    )
                 }
                 .padding(SkillsManagerSpacing.medium)
                 .background(
@@ -245,11 +262,12 @@ struct SkillCatalogView: View {
 
                 Label(
                     """
-                    Installing here performs this command's work natively: Skills Manager \
-                    downloads the same files over HTTPS and copies them into the directories \
-                    you select. Nothing from skills.sh is run on your Mac.
+                    Skills Manager downloads these files over HTTPS and copies them into the \
+                    directories you select; it does not execute downloaded content during \
+                    installation. A skill is instructions for your agent, so review SKILL.md \
+                    before allowing an agent to use it.
                     """,
-                    systemImage: "checkmark.shield"
+                    systemImage: "text.magnifyingglass"
                 )
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -260,13 +278,16 @@ struct SkillCatalogView: View {
     @ViewBuilder
     private func installSection(for skill: CatalogSkill) -> some View {
         if installableSources.isEmpty {
-            ContentUnavailableView(
-                "Add an Agent Directory First",
-                systemImage: "folder.badge.plus",
-                description: Text(
-                    "Close Discover Skills, then add a Codex, Claude Code, or other agent directory."
-                )
-            )
+            ContentUnavailableView {
+                Label("Add an Agent Directory First", systemImage: "folder.badge.plus")
+            } description: {
+                Text("Add a Codex, Claude Code, or other agent directory before installing.")
+            } actions: {
+                SettingsLink {
+                    Label("Manage Agent Directories", systemImage: "gearshape")
+                }
+                .buttonStyle(.borderedProminent)
+            }
         } else if skill.isInstallable == false {
             Label(
                 "This skill's source is not an installable GitHub repository.",
@@ -281,11 +302,16 @@ struct SkillCatalogView: View {
 
                     Spacer(minLength: SkillsManagerSpacing.small)
 
-                    if installableSources.count > 1 {
-                        Button(areAllSourcesSelected ? "Deselect All" : "Select All") {
-                            toggleAllSources()
+                    if selectableSources(for: skill).count > 1 {
+                        Button(
+                            areAllSelectableSourcesSelected(for: skill)
+                                ? "Deselect All"
+                                : "Select All"
+                        ) {
+                            toggleAllSources(for: skill)
                         }
                         .buttonStyle(.link)
+                        .disabled(isInstallRequestActive)
                     }
                 }
 
@@ -296,7 +322,7 @@ struct SkillCatalogView: View {
                 Button {
                     install(skill)
                 } label: {
-                    if catalogModel.installingSkillID == skill.id {
+                    if isInstallRequestActive {
                         HStack(spacing: SkillsManagerSpacing.small) {
                             ProgressView()
                                 .controlSize(.small)
@@ -309,7 +335,7 @@ struct SkillCatalogView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(
                     destinations(for: skill).isEmpty
-                        || catalogModel.installingSkillID != nil
+                        || isInstallRequestActive
                 )
 
                 if let hint = installHint(for: skill) {
@@ -339,7 +365,7 @@ struct SkillCatalogView: View {
             }
         }
         .toggleStyle(.checkbox)
-        .disabled(isAlreadyInstalled)
+        .disabled(isAlreadyInstalled || isInstallRequestActive)
         .accessibilityLabel(
             isAlreadyInstalled
                 ? "\(source.agent.displayName), \(source.displayName), already installed"
@@ -355,7 +381,7 @@ struct SkillCatalogView: View {
 
         if let command = skill.installCommand {
             Button("Copy Install Command", systemImage: "document.on.document") {
-                copy(command.displayText)
+                copy(command.displayText, for: skill.id)
             }
         }
 
@@ -363,7 +389,7 @@ struct SkillCatalogView: View {
             selectedSkillID = skill.id
             install(skill)
         }
-        .disabled(destinations(for: skill).isEmpty || catalogModel.installingSkillID != nil)
+        .disabled(destinations(for: skill).isEmpty || isInstallRequestActive)
     }
 
     // MARK: - Selection
@@ -382,9 +408,14 @@ struct SkillCatalogView: View {
         }
     }
 
-    private var areAllSourcesSelected: Bool {
-        installableSources.isEmpty == false
-            && installableSources.allSatisfy { selectedSourceIDs.contains($0.id) }
+    private func selectableSources(for skill: CatalogSkill) -> [SkillSource] {
+        installableSources.filter { isInstalled(skill, in: $0.id) == false }
+    }
+
+    private func areAllSelectableSourcesSelected(for skill: CatalogSkill) -> Bool {
+        let sources = selectableSources(for: skill)
+        return sources.isEmpty == false
+            && sources.allSatisfy { selectedSourceIDs.contains($0.id) }
     }
 
     private func sourceSelection(for sourceID: SkillSource.ID) -> Binding<Bool> {
@@ -400,16 +431,17 @@ struct SkillCatalogView: View {
         )
     }
 
-    private func toggleAllSources() {
-        if areAllSourcesSelected {
-            selectedSourceIDs.removeAll()
+    private func toggleAllSources(for skill: CatalogSkill) {
+        let selectableIDs = Set(selectableSources(for: skill).map(\.id))
+        if areAllSelectableSourcesSelected(for: skill) {
+            selectedSourceIDs.subtract(selectableIDs)
         } else {
-            selectedSourceIDs = Set(installableSources.map(\.id))
+            selectedSourceIDs.formUnion(selectableIDs)
         }
     }
 
-    /// Drops directories that are no longer installable and keeps one selected so the
-    /// install button is reachable as soon as a skill is chosen.
+    /// Drops directories that are no longer installable and chooses an initial default.
+    /// The user may still explicitly deselect every directory.
     private func reconcileSourceSelection() {
         let availableIDs = Set(installableSources.map(\.id))
         selectedSourceIDs.formIntersection(availableIDs)
@@ -459,10 +491,17 @@ struct SkillCatalogView: View {
 
     // MARK: - Actions
 
-    private func copy(_ text: String) {
+    private func copy(_ text: String, for skillID: CatalogSkill.ID) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
-        didCopyCommand = true
+        copiedSkillID = skillID
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            if copiedSkillID == skillID {
+                copiedSkillID = nil
+            }
+        }
     }
 
     private func install(_ skill: CatalogSkill) {
@@ -471,7 +510,12 @@ struct SkillCatalogView: View {
             return
         }
 
+        isInstallRequestActive = true
         Task { @MainActor in
+            defer {
+                isInstallRequestActive = false
+            }
+
             let outcomes = await catalogModel.install(skill, into: destinations)
 
             for outcome in outcomes where outcome.didSucceed {
@@ -496,12 +540,35 @@ struct SkillCatalogView: View {
                 return
             }
 
-            presentedError = CatalogPresentedError(
-                title: "Unable to Install \(skill.name)",
-                message:
-                    failures
-                    .map { "\($0.sourceName): \($0.errorMessage ?? "Unknown error.")" }
+            let successes = outcomes.filter(\.didSucceed)
+            let failureSummary =
+                failures
+                .map { "• \($0.sourceName): \($0.errorMessage ?? "Unknown error.")" }
+                .joined(separator: "\n")
+            let message: String
+            if successes.isEmpty {
+                message = failureSummary
+            } else {
+                let successSummary =
+                    successes
+                    .map { "• \($0.sourceName)" }
                     .joined(separator: "\n")
+                message =
+                    """
+                    Installed in:
+                    \(successSummary)
+
+                    Could not install in:
+                    \(failureSummary)
+                    """
+            }
+
+            presentedError = CatalogPresentedError(
+                title:
+                    successes.isEmpty
+                    ? "Unable to Install \(skill.name)"
+                    : "\(skill.name) Installed with Issues",
+                message: message
             )
         }
     }

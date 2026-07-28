@@ -9,6 +9,20 @@ import SkillsCore
 @MainActor
 @Observable
 final class SkillCatalogModel {
+    private enum CatalogInstallError: LocalizedError {
+        case invalidCatalogEntry
+        case installInProgress
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidCatalogEntry:
+                "This skill's catalog data cannot be installed safely."
+            case .installInProgress:
+                "Another skill installation is already in progress."
+            }
+        }
+    }
+
     /// What one configured directory got out of a multi-directory install.
     struct InstallOutcome: Identifiable, Hashable {
         let sourceID: SkillSource.ID
@@ -24,7 +38,18 @@ final class SkillCatalogModel {
     /// The shortest query skills.sh will accept.
     static let minimumQueryLength = 2
 
-    var query = ""
+    var query = "" {
+        didSet {
+            guard query != oldValue else {
+                return
+            }
+
+            activeSearchRequestID = nil
+            searchResults = []
+            searchErrorMessage = nil
+            isSearching = trimmedQuery.count >= Self.minimumQueryLength
+        }
+    }
     private(set) var searchResults: [CatalogSkill] = []
     private(set) var topDownloads: [CatalogSkill] = []
     private(set) var isSearching = false
@@ -37,6 +62,8 @@ final class SkillCatalogModel {
     @ObservationIgnored private let packageFetcher: any SkillPackageFetching
     @ObservationIgnored private let packageInstaller: any SkillPackageInstalling
     @ObservationIgnored private var hasRequestedTopDownloads = false
+    @ObservationIgnored private var activeSearchRequestID: UUID?
+    @ObservationIgnored private var topDownloadsTask: Task<Void, Never>?
 
     init(
         catalog: any SkillCatalogSearching,
@@ -68,75 +95,101 @@ final class SkillCatalogModel {
 
     /// Loads the leaderboard once per session so reopening Discover is instant.
     func loadTopDownloads() async {
+        if let topDownloadsTask {
+            await topDownloadsTask.value
+            return
+        }
+
         guard hasRequestedTopDownloads == false else {
             return
         }
 
-        await refreshTopDownloads()
+        await requestTopDownloads()
     }
 
     /// Reloads the leaderboard, which is what the failure state's retry action calls.
     func refreshTopDownloads() async {
+        await requestTopDownloads()
+    }
+
+    /// Starts one request or joins the request already warming the session cache.
+    private func requestTopDownloads() async {
+        if let topDownloadsTask {
+            await topDownloadsTask.value
+            return
+        }
+
         hasRequestedTopDownloads = true
         isLoadingTopDownloads = true
         topDownloadsErrorMessage = nil
 
-        do {
-            let page = try await catalog.topDownloads(page: 0)
-            guard Task.isCancelled == false else {
+        let request = Task { @MainActor in
+            defer {
                 isLoadingTopDownloads = false
-                return
             }
 
-            topDownloads = CatalogSkillSorter.byDownloads(page.skills)
-            isLoadingTopDownloads = false
-        } catch is CancellationError {
-            // A cancelled load never reached the catalog, so let the next appearance retry.
-            hasRequestedTopDownloads = false
-            isLoadingTopDownloads = false
-        } catch {
-            guard Task.isCancelled == false else {
-                isLoadingTopDownloads = false
-                return
+            do {
+                let page = try await catalog.topDownloads(page: 0)
+                topDownloads = CatalogSkillSorter.byDownloads(page.skills)
+            } catch is CancellationError {
+                // Let a future appearance retry if the loader itself cancels the request.
+                hasRequestedTopDownloads = false
+            } catch {
+                topDownloads = []
+                topDownloadsErrorMessage = error.localizedDescription
             }
-
-            topDownloads = []
-            topDownloadsErrorMessage = error.localizedDescription
-            isLoadingTopDownloads = false
         }
+
+        topDownloadsTask = request
+        await request.value
+        topDownloadsTask = nil
     }
 
     func search() async {
         let submittedQuery = trimmedQuery
         guard submittedQuery.count >= Self.minimumQueryLength else {
+            activeSearchRequestID = nil
             searchResults = []
             searchErrorMessage = nil
             isSearching = false
             return
         }
 
+        let requestID = UUID()
+        activeSearchRequestID = requestID
+        searchResults = []
         isSearching = true
         searchErrorMessage = nil
+        defer {
+            if activeSearchRequestID == requestID {
+                activeSearchRequestID = nil
+                isSearching = false
+            }
+        }
 
         do {
             let matches = try await catalog.search(query: submittedQuery, limit: 100)
-            guard Task.isCancelled == false, trimmedQuery == submittedQuery else {
+            guard
+                Task.isCancelled == false,
+                trimmedQuery == submittedQuery,
+                activeSearchRequestID == requestID
+            else {
                 return
             }
 
             searchResults = CatalogSkillSorter.byDownloads(matches)
-            isSearching = false
         } catch is CancellationError {
-            isSearching = false
+            return
         } catch {
-            guard Task.isCancelled == false else {
-                isSearching = false
+            guard
+                Task.isCancelled == false,
+                activeSearchRequestID == requestID
+            else {
                 return
             }
 
             searchResults = []
             searchErrorMessage = error.localizedDescription
-            isSearching = false
         }
     }
 
@@ -156,6 +209,28 @@ final class SkillCatalogModel {
     ) async -> [InstallOutcome] {
         guard destinations.isEmpty == false else {
             return []
+        }
+
+        guard skill.isInstallable else {
+            return destinations.map {
+                InstallOutcome(
+                    sourceID: $0.id,
+                    sourceName: $0.displayName,
+                    installedURL: nil,
+                    errorMessage: CatalogInstallError.invalidCatalogEntry.localizedDescription
+                )
+            }
+        }
+
+        guard installingSkillID == nil else {
+            return destinations.map {
+                InstallOutcome(
+                    sourceID: $0.id,
+                    sourceName: $0.displayName,
+                    installedURL: nil,
+                    errorMessage: CatalogInstallError.installInProgress.localizedDescription
+                )
+            }
         }
 
         installingSkillID = skill.id

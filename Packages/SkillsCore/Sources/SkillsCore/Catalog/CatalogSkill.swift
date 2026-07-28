@@ -78,7 +78,7 @@ public struct CatalogSkill: Identifiable, Hashable, Codable, Sendable {
             let repository = githubRepository,
             CatalogIdentifier.validatedArgument(repository.owner) != nil,
             CatalogIdentifier.validatedArgument(repository.name) != nil,
-            let slug = CatalogIdentifier.validatedArgument(slug),
+            let slug = CatalogIdentifier.validatedInstallationDirectoryName(slug),
             let repositoryURL
         else {
             return nil

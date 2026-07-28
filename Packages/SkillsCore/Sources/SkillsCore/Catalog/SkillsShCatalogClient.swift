@@ -52,8 +52,8 @@ public struct SkillsShCatalogClient: SkillCatalogSearching {
     /// unexpected response, and either way the extra entries are dropped.
     private static let maximumPageSize = 200
 
-    /// A ceiling on the body Skills Manager will decode, so a runaway response cannot
-    /// exhaust memory in the app process.
+    /// A ceiling checked before JSON decoding to bound decoder work. The default URLSession
+    /// loader buffers the response before this check; streaming limits are future hardening.
     private static let maximumResponseSize = 8 * 1_024 * 1_024
 
     private let baseURL: URL

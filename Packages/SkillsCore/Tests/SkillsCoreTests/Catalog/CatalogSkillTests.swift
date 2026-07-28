@@ -95,6 +95,50 @@ struct CatalogSkillTests {
         #expect(skill.installCommand == nil)
     }
 
+    @Test("A dot-prefixed identifier cannot create a hidden installed skill")
+    func rejectsHiddenIdentifiers() {
+        let hiddenSlug = makeSkill(slug: ".hidden")
+        #expect(hiddenSlug.installCommand == nil)
+        #expect(hiddenSlug.isInstallable == false)
+    }
+
+    @Test("A dot-prefixed repository component remains a safe URL component")
+    func acceptsDotPrefixedRepositoryComponent() {
+        let skill = makeSkill(source: "owner/.github")
+
+        #expect(skill.githubRepository?.name == ".github")
+        #expect(skill.installCommand != nil)
+    }
+
+    @Test("A dot inside an identifier remains valid")
+    func acceptsInternalDot() {
+        let skill = makeSkill(slug: "my.skill")
+
+        #expect(skill.installCommand != nil)
+        #expect(skill.isInstallable)
+    }
+
+    @Test(
+        "Unsafe install slugs never become command arguments or directory names",
+        arguments: [
+            "",
+            " ",
+            "../evil",
+            "name;whoami",
+            "$(id)",
+            "name`whoami`",
+            "name\nnext",
+            "name%2Fevil",
+            "🔥",
+        ]
+    )
+    func rejectsUnsafeSlugs(slug: String) {
+        let skill = makeSkill(slug: slug)
+
+        #expect(skill.installCommand == nil)
+        #expect(skill.isInstallable == false)
+    }
+
     @Test(
         "A catalog identifier that is not a safe path yields no page URL",
         arguments: ["owner/../secret", "owner//name", "owner/name/../..", ""]

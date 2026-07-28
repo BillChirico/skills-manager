@@ -61,6 +61,38 @@ struct SkillCatalogModelTests {
         #expect(await catalog.topDownloadCallCount == 2)
     }
 
+    @Test("A reopened Discover view joins a leaderboard request whose first caller cancelled")
+    func reopenedDiscoverJoinsCancelledCallersRequest() async {
+        let catalog = SuspendingTopDownloadsCatalog(
+            page: CatalogPage(
+                skills: [makeSkill(slug: "leader", installs: 9_000)],
+                page: 0,
+                hasMore: false
+            )
+        )
+        let model = SkillCatalogModel(
+            catalog: catalog,
+            packageFetcher: FixturePackageFetcher(),
+            packageInstaller: FixturePackageInstaller()
+        )
+
+        let firstLoad = Task { await model.loadTopDownloads() }
+        await catalog.waitUntilRequested()
+        firstLoad.cancel()
+        let reopenedLoad = Task { await model.loadTopDownloads() }
+        await Task.yield()
+
+        #expect(await catalog.topDownloadCallCount == 1)
+
+        await catalog.resumeFirstRequest()
+        await firstLoad.value
+        await reopenedLoad.value
+
+        #expect(await catalog.topDownloadCallCount == 1)
+        #expect(model.topDownloads.map(\.slug) == ["leader"])
+        #expect(model.isLoadingTopDownloads == false)
+    }
+
     @Test("Searching publishes matching catalog skills ranked by downloads")
     func publishesSearchResultsRankedByDownloads() async {
         let model = SkillCatalogModel(
@@ -120,6 +152,42 @@ struct SkillCatalogModelTests {
         #expect(model.searchResults.isEmpty)
         #expect(model.isSearching == false)
         #expect(model.searchErrorMessage == "Catalog unavailable")
+    }
+
+    @Test("Only the newest overlapping search can publish state")
+    func newestOverlappingSearchOwnsState() async {
+        let catalog = ControlledSearchCatalog()
+        let model = SkillCatalogModel(
+            catalog: catalog,
+            packageFetcher: FixturePackageFetcher(),
+            packageInstaller: FixturePackageInstaller()
+        )
+
+        model.query = "first"
+        let firstSearch = Task { await model.search() }
+        await catalog.waitForSearch(query: "first")
+
+        model.query = "second"
+        let secondSearch = Task { await model.search() }
+        await catalog.waitForSearch(query: "second")
+
+        await catalog.resolve(
+            query: "first",
+            with: [makeSkill(slug: "stale", installs: 100)]
+        )
+        await firstSearch.value
+
+        #expect(model.isSearching)
+        #expect(model.searchResults.isEmpty)
+
+        await catalog.resolve(
+            query: "second",
+            with: [makeSkill(slug: "current", installs: 200)]
+        )
+        await secondSearch.value
+
+        #expect(model.searchResults.map(\.slug) == ["current"])
+        #expect(model.isSearching == false)
     }
 
     @Test("Installing into several directories downloads the package once")
@@ -203,6 +271,66 @@ struct SkillCatalogModelTests {
         #expect(await fetcher.fetchCount == 0)
     }
 
+    @Test("The install boundary rejects an unsafe catalog entry before downloading")
+    func rejectsUnsafeCatalogEntry() async {
+        let fetcher = FixturePackageFetcher()
+        let model = SkillCatalogModel(
+            catalog: FixtureCatalog(),
+            packageFetcher: fetcher,
+            packageInstaller: FixturePackageInstaller()
+        )
+        let destination = makeSource(name: "Codex", path: "/skills/codex")
+
+        let outcomes = await model.install(
+            makeSkill(slug: ".hidden"),
+            into: [destination]
+        )
+
+        #expect(outcomes.count == 1)
+        #expect(outcomes[0].didSucceed == false)
+        #expect(
+            outcomes[0].errorMessage
+                == "This skill's catalog data cannot be installed safely."
+        )
+        #expect(await fetcher.fetchCount == 0)
+        #expect(model.installingSkillID == nil)
+    }
+
+    @Test("A second install is rejected while the first install owns the busy state")
+    func rejectsOverlappingInstalls() async {
+        let fetcher = SuspendingPackageFetcher()
+        let model = SkillCatalogModel(
+            catalog: FixtureCatalog(),
+            packageFetcher: fetcher,
+            packageInstaller: FixturePackageInstaller()
+        )
+        let skill = makeSkill()
+        let destination = makeSource(name: "Codex", path: "/skills/codex")
+
+        let firstInstall = Task {
+            await model.install(skill, into: [destination])
+        }
+        await fetcher.waitUntilStarted()
+
+        let secondOutcomes = await model.install(skill, into: [destination])
+
+        #expect(await fetcher.fetchCount == 1)
+        #expect(model.installingSkillID == skill.id)
+        #expect(secondOutcomes.count == 1)
+        #expect(secondOutcomes[0].didSucceed == false)
+        #expect(
+            secondOutcomes[0].errorMessage
+                == "Another skill installation is already in progress."
+        )
+
+        await fetcher.resume()
+        let firstOutcomes = await firstInstall.value
+
+        #expect(firstOutcomes.count == 1)
+        #expect(firstOutcomes[0].didSucceed)
+        #expect(model.installingSkillID == nil)
+    }
+
     private func makeSkill(
         slug: String = "swift-testing-pro",
         installs: Int = 6_900
@@ -260,6 +388,66 @@ private actor FailingCatalog: SkillCatalogSearching {
     }
 }
 
+private actor ControlledSearchCatalog: SkillCatalogSearching {
+    private var continuations: [String: CheckedContinuation<[CatalogSkill], any Error>] = [:]
+
+    func search(query: String, limit: Int) async throws -> [CatalogSkill] {
+        try await withCheckedThrowingContinuation { continuation in
+            continuations[query] = continuation
+        }
+    }
+
+    func topDownloads(page: Int) async throws -> CatalogPage {
+        CatalogPage(skills: [], page: page, hasMore: false)
+    }
+
+    func waitForSearch(query: String) async {
+        while continuations[query] == nil {
+            await Task.yield()
+        }
+    }
+
+    func resolve(query: String, with skills: [CatalogSkill]) {
+        continuations.removeValue(forKey: query)?.resume(returning: skills)
+    }
+}
+
+private actor SuspendingTopDownloadsCatalog: SkillCatalogSearching {
+    private let page: CatalogPage
+    private var firstContinuation: CheckedContinuation<CatalogPage, Never>?
+    private(set) var topDownloadCallCount = 0
+
+    init(page: CatalogPage) {
+        self.page = page
+    }
+
+    func search(query: String, limit: Int) async throws -> [CatalogSkill] {
+        []
+    }
+
+    func topDownloads(page: Int) async throws -> CatalogPage {
+        topDownloadCallCount += 1
+        guard topDownloadCallCount == 1 else {
+            return self.page
+        }
+
+        return await withCheckedContinuation { continuation in
+            firstContinuation = continuation
+        }
+    }
+
+    func waitUntilRequested() async {
+        while firstContinuation == nil {
+            await Task.yield()
+        }
+    }
+
+    func resumeFirstRequest() {
+        firstContinuation?.resume(returning: page)
+        firstContinuation = nil
+    }
+}
+
 private actor FixturePackageFetcher: SkillPackageFetching {
     private(set) var fetchCount = 0
 
@@ -274,6 +462,39 @@ private actor FixturePackageFetcher: SkillPackageFetching {
                 )
             ]
         )
+    }
+}
+
+private actor SuspendingPackageFetcher: SkillPackageFetching {
+    private var continuation: CheckedContinuation<SkillPackage, Never>?
+    private(set) var fetchCount = 0
+
+    func fetchPackage(for skill: CatalogSkill) async throws -> SkillPackage {
+        fetchCount += 1
+        return await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func waitUntilStarted() async {
+        while continuation == nil {
+            await Task.yield()
+        }
+    }
+
+    func resume() {
+        continuation?.resume(
+            returning: SkillPackage(
+                skillID: "fixture",
+                files: [
+                    SkillPackageFile(
+                        path: "SKILL.md",
+                        contents: Data("---\nname: fixture\n---\n".utf8)
+                    )
+                ]
+            )
+        )
+        continuation = nil
     }
 }
 

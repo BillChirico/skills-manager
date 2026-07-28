@@ -100,8 +100,10 @@ at the top of a skill page, with a copy action for running it yourself.
 Skills Manager **displays** that command; it never executes it. Installing from
 the app performs the command's work natively: it downloads the same files over
 HTTPS and copies them into the directories you selected. Skills are copied as
-data and are not executed during installation. Two reasons this is not a shell
-invocation:
+data and are not executed during installation. Installed skills are instructions
+that an agent may later follow with that agent's own permissions, so review
+`SKILL.md` before allowing an agent to use one. Two reasons installation is not a
+shell invocation:
 
 - `npx` fetches and runs arbitrary remote code, which would turn a catalog entry
   into local code execution.
@@ -110,7 +112,8 @@ invocation:
 
 The command is rebuilt locally from validated catalog fields rather than scraped
 from the remote page, so the text on screen cannot contain shell metacharacters.
-Review a skill on skills.sh or inspect its files before using it with an agent.
+Dot-prefixed installation slugs are rejected so a catalog entry cannot create a
+hidden directory that Skills Manager's scanner would skip.
 
 ## Directory access
 

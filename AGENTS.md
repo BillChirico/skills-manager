@@ -113,17 +113,24 @@ renders next to it.
 Never execute a command sourced from skills.sh, and never hand catalog text to a
 shell, `Process`, `NSAppleScript`, or `NSWorkspace.open` for a non-`https` URL.
 The install command in the detail view exists to be read and copied. Skills
-Manager installs by downloading files over HTTPS and copying them, which is the
-guarantee the UI states; a spawned `npx` would both execute arbitrary remote code
-and write outside the user's directory grants.
+Manager installs by downloading files over HTTPS and copying them; a spawned
+`npx` would both execute arbitrary remote code and write outside the user's
+directory grants. UI copy must distinguish that install-time behavior from later
+use: an installed `SKILL.md` is instructions that an agent may follow with its
+own permissions, so users must be told to review it before use.
 
 Every field on `CatalogSkill` is untrusted. Route each one through
 `CatalogIdentifier` before it becomes a URL path component
 (`validatedPathComponent`) or a command argument (`validatedArgument`, which also
 rejects a leading `-` so a slug cannot be read as a flag). A value that fails
 validation makes the skill non-installable; it must not degrade into an
-unvalidated fallback. Build `SkillInstallCommand` as a program plus an argument
-vector, never as one interpolated string.
+unvalidated fallback. Reject dot-prefixed installation slugs because the library
+scanner skips hidden directories, while still allowing safe dot-prefixed
+repository path components such as `.github`. Re-check installability at the
+model boundary, and keep the filesystem installer responsible for refusing
+hidden destination names even if a future caller bypasses the catalog UI. Build
+`SkillInstallCommand` as a program plus an argument vector, never as one
+interpolated string.
 
 Repository tree paths are remote input too. `GitHubSkillPackageFetcher` drops any
 entry containing an empty, `.`, or `..` component before it reaches a

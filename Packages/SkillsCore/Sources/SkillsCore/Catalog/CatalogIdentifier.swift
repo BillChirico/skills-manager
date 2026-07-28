@@ -5,8 +5,10 @@ import Foundation
 ///
 /// Every value in a `CatalogSkill` arrives from skills.sh, so it is untrusted input.
 /// A value that survives these checks contains no path separators, no relative path
-/// segments, and no leading option marker, which is what keeps a remote catalog entry
-/// from steering a request off its intended path or from being read as a flag.
+/// segments, or shell metacharacters. Command arguments receive an additional
+/// leading-option check, while installation directory names also reject a leading dot.
+/// Together these checks keep remote data from steering a request off its intended path,
+/// disappearing from discovery after installation, or being read as a flag.
 enum CatalogIdentifier {
     /// Long enough for any real GitHub owner, repository, or skill slug.
     static let maximumLength = 100
@@ -38,6 +40,18 @@ enum CatalogIdentifier {
         guard
             let value = validatedPathComponent(value),
             value.hasPrefix("-") == false
+        else {
+            return nil
+        }
+
+        return value
+    }
+
+    /// Returns the value when it is safe to use as the installed skill directory.
+    static func validatedInstallationDirectoryName(_ value: String) -> String? {
+        guard
+            let value = validatedArgument(value),
+            value.hasPrefix(".") == false
         else {
             return nil
         }
