@@ -225,5 +225,6 @@ struct SkillsShCatalogClientTests {
         await #expect(throws: SkillsShCatalogError.responseTooLarge) {
             try await client.topDownloads(page: 0)
         }
+        #expect(await loader.maximumByteCounts == [8 * 1_024 * 1_024])
     }
 }

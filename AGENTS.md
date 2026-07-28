@@ -136,6 +136,27 @@ Repository tree paths are remote input too. `GitHubSkillPackageFetcher` drops an
 entry containing an empty, `.`, or `..` component before it reaches a
 `raw.githubusercontent.com` URL, in addition to the installer's own path checks.
 
+Treat text extracted from an installed `SKILL.md` as untrusted presentation
+input. Its library overview must remain non-interactive. Markdown styling may be
+parsed only when every link attribute is stripped before rendering; never allow
+a manifest-supplied destination to become clickable. Any intentional external
+navigation must be a separately constructed, validated `https` action.
+
+All catalog, repository-tree, and raw-file bodies must use the bounded streaming
+HTTP loader. Do not replace a streaming ceiling with a size check that runs only
+after `URLSession` has buffered the response. Keep skills.sh responses capped at
+8 MiB, keep GitHub recursive tree responses capped at 8 MiB, and keep packages
+capped at 200 files and 10 MiB aggregate. Pass the remaining aggregate byte
+budget to each raw-file request so no individual response can cross the package
+ceiling.
+
+Resolve GitHub `HEAD` exactly once per package fetch and use the resulting commit
+SHA for both recursive tree enumeration and every raw-content URL. Select a
+nested manifest only when its immediate parent directory matches the requested
+slug. A root `SKILL.md` is eligible only when it is the repository's sole
+manifest and the validated repository name exactly matches that slug; otherwise
+fail closed with no manifest fallback.
+
 ## Change checklist
 
 1. Keep the change inside the existing dependency boundaries.
