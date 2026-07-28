@@ -59,7 +59,10 @@ public struct GitHubSkillPackageFetcher: SkillPackageFetching {
             throw SkillPackageFetchError.packageTooLarge
         }
 
-        let manifestItems = tree.tree.filter {
+        // Tree paths are remote input and end up in a raw.githubusercontent URL, so a
+        // relative segment is dropped before it can steer the request off the repository.
+        let treeItems = tree.tree.filter { Self.isSafeRepositoryPath($0.path) }
+        let manifestItems = treeItems.filter {
             $0.type == "blob" && $0.path.split(separator: "/").last == "SKILL.md"
         }
         let matchingManifest =
@@ -74,7 +77,8 @@ public struct GitHubSkillPackageFetcher: SkillPackageFetching {
 
         let manifestComponents = matchingManifest.path.split(separator: "/")
         let directoryPrefix = manifestComponents.dropLast().joined(separator: "/")
-        let packageItems = tree.tree
+        let packageItems =
+            treeItems
             .filter { item in
                 guard item.type == "blob" else {
                     return false
@@ -121,6 +125,18 @@ public struct GitHubSkillPackageFetcher: SkillPackageFetching {
         }
 
         return SkillPackage(skillID: skill.id, files: files)
+    }
+
+    /// Whether a repository-relative path can be appended to a URL and written to disk
+    /// without escaping its own directory.
+    private static func isSafeRepositoryPath(_ path: String) -> Bool {
+        guard path.hasPrefix("/") == false, path.contains("\\") == false else {
+            return false
+        }
+
+        let components = path.split(separator: "/", omittingEmptySubsequences: false)
+        return components.isEmpty == false
+            && components.allSatisfy { $0.isEmpty == false && $0 != "." && $0 != ".." }
     }
 
     private func fetchTree(owner: String, repository: String) async throws -> TreeResponse {
