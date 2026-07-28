@@ -21,6 +21,7 @@
 		532A329985E27486B05C5193 /* SkillsManagerAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4BFFAD3E6AB156341E9F95B /* SkillsManagerAppTests.swift */; };
 		5D5602FFD0D40D41CB932098 /* UserHomeDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0CC42992263A0D1F972483A /* UserHomeDirectory.swift */; };
 		65F55ED1141CC3500D8264D2 /* SkillCatalogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E400BD791ADC589ADFD33C19 /* SkillCatalogView.swift */; };
+		71BC108A3916D017523C0758 /* UserHomeDirectoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9435086B058725D24C7EE076 /* UserHomeDirectoryTests.swift */; };
 		7D8580E826C0150748097DF1 /* SkillList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 967846C50FEAD77DB44AC053 /* SkillList.swift */; };
 		81712A7A5CC04311C93C9225 /* SkillSourceSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A4E285DCEC62A32FE2BCFD8 /* SkillSourceSidebar.swift */; };
 		969AE94BB0DE1FD72398A99D /* SkillsCore in Frameworks */ = {isa = PBXBuildFile; productRef = 3380F0FCA4019E2DFC6388F0 /* SkillsCore */; };
@@ -63,6 +64,7 @@
 		8A6FD9583210F461B8C10058 /* SkillLibraryModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryModelTests.swift; sourceTree = "<group>"; };
 		9012D9D210AEF08DCBE01777 /* ARCHITECTURE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ARCHITECTURE.md; sourceTree = "<group>"; };
 		93A141CC23CA196562F6ACF7 /* ToolbarSearchFieldWidth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolbarSearchFieldWidth.swift; sourceTree = "<group>"; };
+		9435086B058725D24C7EE076 /* UserHomeDirectoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserHomeDirectoryTests.swift; sourceTree = "<group>"; };
 		967846C50FEAD77DB44AC053 /* SkillList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillList.swift; sourceTree = "<group>"; };
 		9D8C677DEC993CE4CF7548D8 /* SkillsManager.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SkillsManager.entitlements; sourceTree = "<group>"; };
 		A08B991B2714753A37B17F5B /* SkillLibraryOrganizationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryOrganizationTests.swift; sourceTree = "<group>"; };
@@ -119,6 +121,7 @@
 				A08B991B2714753A37B17F5B /* SkillLibraryOrganizationTests.swift */,
 				DD2138FB85F681287F0500AD /* SkillLibraryScopeTitleTests.swift */,
 				A4BFFAD3E6AB156341E9F95B /* SkillsManagerAppTests.swift */,
+				9435086B058725D24C7EE076 /* UserHomeDirectoryTests.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -406,6 +409,7 @@
 				F4A10445C675EABDC1AFC8AF /* SkillLibraryOrganizationTests.swift in Sources */,
 				3744736E0CC69687A3FCD69C /* SkillLibraryScopeTitleTests.swift in Sources */,
 				532A329985E27486B05C5193 /* SkillsManagerAppTests.swift in Sources */,
+				71BC108A3916D017523C0758 /* UserHomeDirectoryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

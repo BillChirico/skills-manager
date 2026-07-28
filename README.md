@@ -104,7 +104,9 @@ sandboxed build only receives access to folders the user confirms, so when the
 sandbox denies a suggestion the app falls back to the system directory picker
 opened at that same location. Empty library states open Settings rather than
 duplicating this picker flow. Settings itself includes an Add Folder action when
-the list is empty.
+the list is empty. If the operating system cannot resolve the signed-in
+account's home directory, Skills Manager suppresses home-based suggestions and
+picker defaults instead of substituting its sandbox container.
 
 Confirmed directories are opened as security-scoped resources before the app
 creates and stores their bookmarks. This keeps the initial scan and access after
@@ -113,7 +115,8 @@ folder on the user's behalf. Each row can pause or resume scanning, unavailable
 rows can reconnect through the system picker, and paths under the home directory
 are abbreviated with `~`. Selecting a row and using the minus control removes
 only the Skills Manager configuration after confirmation; the folder and its
-files remain on disk.
+files remain on disk. Path abbreviation is skipped when the account home cannot
+be resolved.
 
 ## Repository layout
 

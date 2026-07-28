@@ -61,7 +61,9 @@ hand-off when full Xcode is available. If Xcode is unavailable, run
   generic picker action for every other folder rather than a per-agent list.
 - Resolve the account home through `UserHomeDirectory`, never
   `FileManager.homeDirectoryForCurrentUser`, which reports the sandbox container
-  instead of the user's folders.
+  instead of the user's folders. If account-home resolution fails, suppress
+  home-based suggestions, picker defaults, and `~` abbreviation rather than
+  substituting another directory.
 - Keep Settings folder selection explicit: preserve a valid user selection,
   clear a stale one, and never auto-select the first row.
 - Present paused, scanning, and unavailable folder states with text rather than
@@ -112,10 +114,12 @@ stale, because awaiting the save yields the main actor and lets another mutation
 reorder or shrink `sources`. Persist bookmark data owner-only; never widen the
 permissions of the store file.
 
-The abbreviated `~/…` display path exists so the account name stays off screen.
-Do not pass a raw absolute path to a tooltip, label, or accessibility string that
-renders next to it. `UserHomeDirectory` reads the account home from the password
-database, which yields a path and never access to the files beneath it.
+When the account home is available, the abbreviated `~/…` display path keeps the
+account name off screen. Do not pass a raw absolute path to a tooltip, label, or
+accessibility string that renders next to an available abbreviation.
+`UserHomeDirectory` reads the account home from the password database, which
+yields a path and never access to the files beneath it. If that lookup fails,
+leave persisted paths un-abbreviated instead of guessing at the account home.
 
 ## Change checklist
 

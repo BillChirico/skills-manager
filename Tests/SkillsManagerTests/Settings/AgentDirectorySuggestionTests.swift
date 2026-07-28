@@ -30,6 +30,16 @@ struct AgentDirectorySuggestionTests {
         #expect(suggestions.isEmpty)
     }
 
+    @Test("An unavailable account home suppresses every suggestion")
+    func unresolvedHomeSuggestsNothing() {
+        let suggestions = AgentDirectorySuggestion.suggestions(
+            in: nil,
+            directoryExists: { _ in true }
+        )
+
+        #expect(suggestions.isEmpty)
+    }
+
     @Test("Agents without a standard location are never suggested")
     func neverSuggestsAgentsWithoutAStandardLocation() {
         let suggestions = AgentDirectorySuggestion.suggestions(

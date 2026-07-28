@@ -25,10 +25,14 @@ struct AgentDirectorySuggestion: Identifiable, Hashable, Sendable {
     ///   - directoryExists: Reports whether a resolved location exists on disk.
     /// - Returns: One suggestion per agent whose standard location exists.
     static func suggestions(
-        in homeDirectory: URL,
+        in homeDirectory: URL?,
         directoryExists: (URL) -> Bool = AgentDirectorySuggestion.directoryExists(at:)
     ) -> [AgentDirectorySuggestion] {
-        SkillAgent.allCases.compactMap { agent in
+        guard let homeDirectory else {
+            return []
+        }
+
+        return SkillAgent.allCases.compactMap { agent in
             guard
                 let relativePath = agent.defaultSkillsDirectoryRelativePath,
                 let directoryURL = agent.defaultSkillsDirectory(in: homeDirectory),

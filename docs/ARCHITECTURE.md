@@ -34,7 +34,9 @@ installations so network and filesystem work remain independently testable.
 Agent models expose their standard user skill-directory paths.
 `AgentDirectorySuggestion` resolves those paths against the account home and
 keeps only the folders that exist, so the add menu never offers a location the
-user has not created. `SettingsView` owns folder-add, folder-remove,
+user has not created. If account-home resolution fails, it returns no
+suggestions rather than resolving them against the sandbox container.
+`SettingsView` owns folder-add, folder-remove,
 enabled-state, and reconnect presentation, including the suggestion menu,
 explicit list selection, and destructive confirmation. A suggestion adds its
 folder directly through the library model; the picker stays behind one generic
@@ -116,7 +118,9 @@ treats `SourceAccessError.accessDenied` from that path as "consent still
 required" and opens the picker at the suggestion instead of reporting an error;
 every other failure is reported. `UserHomeDirectory` supplies the account home
 that suggestions and `~` abbreviation resolve against, because
-`FileManager.homeDirectoryForCurrentUser` reports the sandbox container.
+`FileManager.homeDirectoryForCurrentUser` reports the sandbox container. The
+password-database lookup is fallible; when it fails, home-based suggestions and
+picker defaults disappear and persisted source paths remain un-abbreviated.
 
 Directory grants are stored as security-scoped bookmarks, resolved on launch,
 and held only while their source remains configured. Failed resolution is surfaced as an unavailable source

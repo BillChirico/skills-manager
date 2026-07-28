@@ -492,7 +492,7 @@ struct FolderSettingsRowPresentation {
     init(
         source: SkillSource,
         state: SkillLibraryModel.SourceState,
-        homeDirectory: URL = UserHomeDirectory.current
+        homeDirectory: URL? = UserHomeDirectory.current
     ) {
         displayPath = Self.displayPath(
             for: source.directoryURL,
@@ -527,9 +527,13 @@ struct FolderSettingsRowPresentation {
 
     private static func displayPath(
         for directoryURL: URL,
-        homeDirectory: URL
+        homeDirectory: URL?
     ) -> String {
         let path = trimmedPath(directoryURL.path(percentEncoded: false))
+        guard let homeDirectory else {
+            return path
+        }
+
         let homePath = trimmedPath(homeDirectory.path(percentEncoded: false))
 
         if path == homePath {
@@ -557,7 +561,7 @@ struct AgentDirectoryMenuContent: View {
     let addSuggestedDirectory: (AgentDirectorySuggestion) -> Void
     /// Opens the system picker so the user can add any other folder.
     let chooseAnotherDirectory: () -> Void
-    var homeDirectory: URL = UserHomeDirectory.current
+    var homeDirectory: URL? = UserHomeDirectory.current
     var directoryExists: (URL) -> Bool = AgentDirectorySuggestion.directoryExists(at:)
 
     var body: some View {
