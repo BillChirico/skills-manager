@@ -53,7 +53,10 @@ through `SkillLibraryModel`.
 - `SkillLibraryFilter`, which applies smart-group and source scopes;
 - `SkillSearch` and `SkillLibrarySorter`, which provide deterministic relevance
   ranking and user-selected ordering;
-- `SkillCatalogSearching`, with the skills.sh search client;
+- `SkillCatalogSearching`, with the skills.sh search and leaderboard client;
+- `CatalogSkillSorter`, which ranks catalog results by download count;
+- `CatalogIdentifier` and `SkillInstallCommand`, which validate remote catalog
+  fields and model the displayed install command;
 - `SkillPackageFetching`, with a GitHub tree and raw-content implementation; and
 - `SkillPackageInstalling`, with a staged filesystem implementation.
 
@@ -62,10 +65,26 @@ real skill folders.
 
 ## Remote discovery and installation
 
-The skills.sh client uses the catalog's public `/api/search` endpoint and
-converts results into domain-owned values. The GitHub fetcher resolves the
-selected skill directory from the repository tree and downloads only blob
-entries beneath it. A non-GitHub source remains browsable but is not installable.
+The skills.sh client uses two public endpoints. `/api/search` answers queries of
+at least two characters, and `/api/skills/all-time/{page}` returns the download
+leaderboard a page at a time. The leaderboard omits the `id` the search endpoint
+reports, so the client composes it from `source` and `skillId` and drops any
+entry missing either. Both responses are capped before decoding so a runaway
+body cannot exhaust memory.
+
+Search results arrive in relevance order, so `CatalogSkillSorter.byDownloads`
+imposes the download ranking the product presents. It is applied in the app's
+catalog model rather than the client, keeping the client a faithful transport and
+the ordering a presentation decision. Ties fall back to name and then identifier
+so repeated responses render identically.
+
+`SkillCatalogModel` caches the leaderboard for the session and keeps it separate
+from search results, so clearing the search field falls back to the cached list
+instead of an empty screen or a refetch.
+
+The GitHub fetcher resolves the selected skill directory from the repository tree
+and downloads only blob entries beneath it. A non-GitHub source remains browsable
+but is not installable.
 
 Before writing, the installer validates the directory name and each path,
 rejects traversal, duplicate paths, and missing manifests, and refuses to
@@ -73,6 +92,35 @@ overwrite an existing skill. Packages are limited to 200 files and 10 MiB,
 assembled in memory, written to a staging directory, then moved into place.
 This prevents a failed download or validation pass from leaving a partial
 installed skill.
+
+A skill can be installed into several configured directories at once. The model
+fetches the package a single time and then writes it per destination, returning
+one outcome per directory so a partial failure is reported rather than collapsed
+into a single error. Directories that already contain the skill are excluded from
+the destination set.
+
+## Untrusted catalog input
+
+Every field on `CatalogSkill` comes from skills.sh. `CatalogIdentifier` gates
+each one before it becomes a URL path component or a command argument: values are
+restricted to `[A-Za-z0-9._-]`, length-capped, and rejected when they are `.`,
+`..`, or empty. The argument rule additionally rejects a leading `-`, because a
+slug such as `--force` would otherwise be read as an option. A value that fails
+validation leaves the skill browsable but not installable; there is no
+unvalidated fallback. This is also what keeps a source like `../evil` from
+steering a `api.github.com` or `raw.githubusercontent.com` request off its path.
+
+Repository tree paths get the same treatment: `GitHubSkillPackageFetcher` drops
+any entry with an empty, `.`, or `..` component before it reaches a raw-content
+URL, so the fetch side is protected as well as the write side.
+
+`SkillInstallCommand` models the `npx skills add …` line that skills.sh prints at
+the top of a skill page. It is rebuilt locally from validated fields rather than
+scraped, and it is stored as a program plus an argument vector, not an
+interpolated string. Skills Manager displays and copies that command; it never
+runs it. Installing natively performs the same work — the same files over HTTPS,
+copied into user-granted directories — without handing execution to arbitrary
+remote npm code and without writing outside the sandbox's user-selected grants.
 
 ## Platform and visual policy
 
@@ -93,6 +141,13 @@ through the app menu and `Command-,`. `SkillsCore` still owns no AppKit, but
 `NSSearchToolbarItem` because SwiftUI exposes no way to stop a toolbar search
 field from growing wider than every action beside it. Prefer a native SwiftUI
 API and add a bridge like this only when none exists.
+
+Discover mirrors that split: the result list is a static ranked list on semantic
+list styling, while the install-command block uses a semantic control background
+with a separator stroke rather than Liquid Glass, since it is a static container.
+Directory selection is a checkbox list so several destinations can be chosen at
+once, and it keeps one directory selected so the install action is reachable —
+unlike Settings, where selection stays entirely explicit.
 
 Settings uses a grouped native `Form` and a resizable minimum/ideal frame. Its
 static folder list uses semantic control and separator colors; Liquid Glass is

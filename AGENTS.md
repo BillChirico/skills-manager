@@ -66,6 +66,10 @@ hand-off when full Xcode is available. If Xcode is unavailable, run
 - Send every folder add, enable, relocate, or remove mutation through
   `SkillLibraryModel` so security-scoped access, bookmarks, persistence, and
   rollback remain intact.
+- Open Discover on the skills.sh download leaderboard, and order both the
+  leaderboard and search results with `CatalogSkillSorter.byDownloads`. A search
+  response arrives in relevance order, so skipping the sorter silently changes
+  the ranking the product promises.
 
 ## Testing conventions
 
@@ -103,6 +107,27 @@ permissions of the store file.
 The abbreviated `~/…` display path exists so the account name stays off screen.
 Do not pass a raw absolute path to a tooltip, label, or accessibility string that
 renders next to it.
+
+### Remote catalog input
+
+Never execute a command sourced from skills.sh, and never hand catalog text to a
+shell, `Process`, `NSAppleScript`, or `NSWorkspace.open` for a non-`https` URL.
+The install command in the detail view exists to be read and copied. Skills
+Manager installs by downloading files over HTTPS and copying them, which is the
+guarantee the UI states; a spawned `npx` would both execute arbitrary remote code
+and write outside the user's directory grants.
+
+Every field on `CatalogSkill` is untrusted. Route each one through
+`CatalogIdentifier` before it becomes a URL path component
+(`validatedPathComponent`) or a command argument (`validatedArgument`, which also
+rejects a leading `-` so a slug cannot be read as a flag). A value that fails
+validation makes the skill non-installable; it must not degrade into an
+unvalidated fallback. Build `SkillInstallCommand` as a program plus an argument
+vector, never as one interpolated string.
+
+Repository tree paths are remote input too. `GitHubSkillPackageFetcher` drops any
+entry containing an empty, `.`, or `..` component before it reaches a
+`raw.githubusercontent.com` URL, in addition to the installer's own path checks.
 
 ## Change checklist
 

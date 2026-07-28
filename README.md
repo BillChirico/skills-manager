@@ -13,7 +13,11 @@ The current product surface includes:
 - per-directory agent assignments for Claude Code, Codex, Cursor, Gemini,
   GitHub Copilot, and other tools;
 - local `SKILL.md` discovery with stable skill identities across rescans;
-- skills.sh search and one-click installation for GitHub-backed catalog skills;
+- a skills.sh Discover window that opens on the catalog's most downloaded
+  skills, ranks search results by download count, shows the download count on
+  every row and in the detail view, links out to the skill's skills.sh page, and
+  displays the page's install command with a copy action;
+- installation into one or many configured directories from a single download;
 - name, date-added, and agent sorting, with the agent and source shown on every
   skill row;
 - right-click actions for updating, enabling, revealing, opening, copying the
@@ -72,16 +76,41 @@ full Xcode app. `make build` and the app unit tests require Xcode. Swift sources
 are formatted with the `swift format` command included in the Swift toolchain;
 run `make lint` for a non-mutating style check.
 
-## Catalog installation
+## Catalog browsing and installation
 
-The Discover Skills window searches skills.sh after two or more characters.
-GitHub-backed results can be installed into any enabled, available agent
-directory. Installation downloads only the selected skill directory, validates
-every relative path, caps package size and file count, stages the files before
-moving them into place, and never replaces an existing directory.
+The Discover Skills window opens on the skills.sh all-time download leaderboard,
+so the first screen is a ranked list rather than an empty search field. Typing
+two or more characters switches to search, and both modes are ordered by
+download count. Each row and the detail view show that count, and the detail
+view links to the skill's page on skills.sh.
 
-Skills are copied as data and are not executed during installation. Review a
-skill on skills.sh or inspect its files before using it with an agent.
+GitHub-backed results can be installed into one or many enabled, available agent
+directories. Selecting several directories downloads the package once and copies
+it into each of them; one directory's failure does not stop the others, and the
+per-directory outcome is reported. Installation downloads only the selected skill
+directory, validates every relative path, caps package size and file count,
+stages the files before moving them into place, and never replaces an existing
+directory.
+
+### The install command
+
+The detail view shows the same `npx skills add …` command that skills.sh prints
+at the top of a skill page, with a copy action for running it yourself.
+
+Skills Manager **displays** that command; it never executes it. Installing from
+the app performs the command's work natively: it downloads the same files over
+HTTPS and copies them into the directories you selected. Skills are copied as
+data and are not executed during installation. Two reasons this is not a shell
+invocation:
+
+- `npx` fetches and runs arbitrary remote code, which would turn a catalog entry
+  into local code execution.
+- The app is sandboxed and writes only through user-selected directory grants,
+  which a spawned CLI would neither inherit nor respect.
+
+The command is rebuilt locally from validated catalog fields rather than scraped
+from the remote page, so the text on screen cannot contain shell metacharacters.
+Review a skill on skills.sh or inspect its files before using it with an agent.
 
 ## Directory access
 
