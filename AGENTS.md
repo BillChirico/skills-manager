@@ -199,7 +199,9 @@ navigation must be a separately constructed, validated `https` action.
 
 Catalog bodies must use the bounded streaming HTTP loader. Do not replace the
 8 MiB streaming ceiling with a size check that runs only after `URLSession` has
-buffered the response.
+buffered the response. Remote catalogs must use an exact, reviewed manifest;
+never accept extra or ambiguous files. Pin remote content to a reviewed commit
+(or equivalent immutable revision), never a moving branch or tag.
 
 ## Change checklist
 
