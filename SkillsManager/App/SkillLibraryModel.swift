@@ -562,14 +562,13 @@ final class SkillLibraryModel {
                     excludedAutomaticDirectoryURLs.remove(insertedAutomaticExclusion)
                 }
 
-                let selectionIsUnchanged = selectedSkillIDs == selectionAfterRemoval
-                if didChangeSidebar,
-                    sidebarSelection == sidebarSelectionAfterRemoval,
-                    selectionIsUnchanged
-                {
+                let interfaceIsUnchanged =
+                    sidebarSelection == sidebarSelectionAfterRemoval
+                    && selectedSkillIDs == selectionAfterRemoval
+                if didChangeSidebar, interfaceIsUnchanged {
                     sidebarSelection = previousSidebarSelection
                 }
-                if selectionIsUnchanged {
+                if interfaceIsUnchanged {
                     selectedSkillIDs.formUnion(selectionRemovedByRemoval)
                 }
                 throw error

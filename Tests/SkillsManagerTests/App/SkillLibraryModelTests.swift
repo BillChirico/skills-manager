@@ -983,6 +983,47 @@ struct SkillLibraryModelTests {
         #expect(model.selectedSkillIDs == [otherSkill.id])
     }
 
+    @Test("A failed removal does not restore selection after sidebar navigation")
+    func failedRemovalPreservesSidebarNavigation() async throws {
+        let removedSource = SkillSource(
+            name: "Alpha Skills",
+            directoryURL: URL(filePath: "/skills/alpha")
+        )
+        let otherSource = SkillSource(
+            name: "Beta Skills",
+            directoryURL: URL(filePath: "/skills/beta")
+        )
+        let removedSkill = AgentSkill(
+            name: "Alpha Skill",
+            directoryURL: removedSource.directoryURL.appending(path: "alpha"),
+            sourceID: removedSource.id
+        )
+        let store = SuspendingFailOnceSourceStore(
+            sources: [removedSource, otherSource]
+        )
+        let model = SkillLibraryModel(
+            sources: [removedSource, otherSource],
+            skills: [removedSkill],
+            sourceStore: store
+        )
+        model.sidebarSelection = .source(removedSource.id)
+        model.selectedSkillIDs = [removedSkill.id]
+
+        let removal = Task { @MainActor in
+            try await model.removeSource(removedSource.id)
+        }
+        await store.waitUntilFirstSaveStarted()
+        model.sidebarSelection = .source(otherSource.id)
+        await store.failFirstSave()
+
+        await #expect(throws: SuspendingFailOnceSourceStore.SaveError.self) {
+            try await removal.value
+        }
+
+        #expect(model.sidebarSelection == .source(otherSource.id))
+        #expect(model.selectedSkillIDs.isEmpty)
+    }
+
     @Test("A failed removal does not restore an invalidated scanning state")
     func failedRemovalNormalizesInvalidatedScanState() async throws {
         let source = SkillSource(
