@@ -583,6 +583,152 @@ struct SkillLibraryModelTests {
         #expect(model.sourceState(for: source.id) == .available)
     }
 
+    @Test("Removing an automatic folder keeps it removed across restoration")
+    func removedAutomaticFolderStaysExcluded() async throws {
+        let homeDirectory = URL(
+            filePath: "/Users/reviewer",
+            directoryHint: .isDirectory
+        )
+        let cursorDirectory = URL(
+            filePath: "/Users/reviewer/.cursor/skills",
+            directoryHint: .isDirectory
+        )
+        let store = MemorySourceStore()
+        let directoryExists: @Sendable (URL) -> Bool = {
+            $0.standardizedFileURL == cursorDirectory.standardizedFileURL
+        }
+        let firstModel = makeModel(
+            sourceStore: store,
+            homeDirectory: homeDirectory,
+            directoryExists: directoryExists
+        )
+        await firstModel.restoreSources()
+        let automaticSource = try #require(firstModel.sources.first)
+
+        try await firstModel.removeSource(automaticSource.id)
+
+        let savedAfterRemoval = await store.loadConfiguration()
+        #expect(firstModel.sources.isEmpty)
+        #expect(savedAfterRemoval.sources.isEmpty)
+        #expect(
+            savedAfterRemoval.excludedAutomaticDirectoryURLs
+                == Set([cursorDirectory])
+        )
+
+        let restoredModel = makeModel(
+            sourceStore: store,
+            homeDirectory: homeDirectory,
+            directoryExists: directoryExists
+        )
+        await restoredModel.restoreSources()
+
+        #expect(restoredModel.sources.isEmpty)
+    }
+
+    @Test("Manually adding an excluded standard folder opts it back in")
+    func manualAddClearsAutomaticFolderExclusion() async throws {
+        let homeDirectory = URL(
+            filePath: "/Users/reviewer",
+            directoryHint: .isDirectory
+        )
+        let geminiDirectory = URL(
+            filePath: "/Users/reviewer/.gemini/skills",
+            directoryHint: .isDirectory
+        )
+        let store = MemorySourceStore(
+            excludedAutomaticDirectoryURLs: Set([geminiDirectory])
+        )
+        let model = makeModel(
+            sourceStore: store,
+            homeDirectory: homeDirectory,
+            directoryExists: {
+                $0.standardizedFileURL == geminiDirectory.standardizedFileURL
+            }
+        )
+        await model.restoreSources()
+        #expect(model.sources.isEmpty)
+
+        try await model.addSource(at: geminiDirectory, agent: .gemini)
+
+        let savedAfterAdd = await store.loadConfiguration()
+        #expect(savedAfterAdd.sources.count == 1)
+        #expect(savedAfterAdd.excludedAutomaticDirectoryURLs.isEmpty)
+
+        let restoredModel = makeModel(
+            sourceStore: store,
+            homeDirectory: homeDirectory,
+            directoryExists: {
+                $0.standardizedFileURL == geminiDirectory.standardizedFileURL
+            }
+        )
+        await restoredModel.restoreSources()
+
+        let restoredSource = try #require(restoredModel.sources.first)
+        #expect(restoredModel.sources.count == 1)
+        #expect(restoredSource.agent == .gemini)
+        #expect(restoredSource.directoryURL == geminiDirectory)
+    }
+
+    @Test("Removing a custom folder does not create an automatic-folder exclusion")
+    func removingCustomFolderDoesNotCreateExclusion() async throws {
+        let customSource = SkillSource(
+            name: "Team Skills",
+            directoryURL: URL(filePath: "/skills/team")
+        )
+        let store = MemorySourceStore(sources: [customSource])
+        let model = SkillLibraryModel(
+            sources: [customSource],
+            sourceStore: store,
+            homeDirectory: URL(
+                filePath: "/Users/reviewer",
+                directoryHint: .isDirectory
+            ),
+            directoryExists: { _ in true }
+        )
+
+        try await model.removeSource(customSource.id)
+
+        let savedAfterRemoval = await store.loadConfiguration()
+        #expect(savedAfterRemoval.sources.isEmpty)
+        #expect(savedAfterRemoval.excludedAutomaticDirectoryURLs.isEmpty)
+    }
+
+    @Test("A failed automatic-folder removal rolls back its pending exclusion")
+    func failedAutomaticFolderRemovalRollsBackExclusion() async throws {
+        let homeDirectory = URL(
+            filePath: "/Users/reviewer",
+            directoryHint: .isDirectory
+        )
+        let cursorDirectory = URL(
+            filePath: "/Users/reviewer/.cursor/skills",
+            directoryHint: .isDirectory
+        )
+        let automaticSource = SkillSource(
+            name: "Cursor Skills",
+            directoryURL: cursorDirectory,
+            agent: .cursor
+        )
+        let store = FailOnceSourceStore(sources: [automaticSource])
+        let model = SkillLibraryModel(
+            sources: [automaticSource],
+            sourceStore: store,
+            bookmarker: StubBookmarker(),
+            sourceAccess: StubSourceAccess(),
+            homeDirectory: homeDirectory,
+            directoryExists: { _ in true }
+        )
+
+        await #expect(throws: FailOnceSourceStore.SaveError.self) {
+            try await model.removeSource(automaticSource.id)
+        }
+        try await model.addSource(at: URL(filePath: "/skills/custom"))
+
+        let savedAfterRecovery = await store.loadConfiguration()
+        #expect(model.sources.contains(automaticSource))
+        #expect(savedAfterRecovery.sources.contains(automaticSource))
+        #expect(savedAfterRecovery.excludedAutomaticDirectoryURLs.isEmpty)
+    }
+
     @Test("A failed pause restores the folder it targeted")
     func rollsBackFailedPause() async throws {
         let source = SkillSource(
@@ -816,18 +962,70 @@ enum SourceRestoreFailure: CaseIterable, Sendable {
 }
 
 private actor MemorySourceStore: SkillSourceStore {
-    private var sources: [SkillSource]
+    private var configuration: SkillSourceConfiguration
 
-    init(sources: [SkillSource] = []) {
-        self.sources = sources
+    init(
+        sources: [SkillSource] = [],
+        excludedAutomaticDirectoryURLs: Set<URL> = []
+    ) {
+        self.configuration = SkillSourceConfiguration(
+            sources: sources,
+            excludedAutomaticDirectoryURLs: excludedAutomaticDirectoryURLs
+        )
     }
 
     func loadSources() -> [SkillSource] {
-        sources
+        configuration.sources
     }
 
     func save(_ sources: [SkillSource]) {
-        self.sources = sources
+        configuration.sources = sources
+    }
+
+    func loadConfiguration() -> SkillSourceConfiguration {
+        configuration
+    }
+
+    func save(_ configuration: SkillSourceConfiguration) {
+        self.configuration = configuration
+    }
+}
+
+private actor FailOnceSourceStore: SkillSourceStore {
+    struct SaveError: Error {}
+
+    private var configuration: SkillSourceConfiguration
+    private var shouldFailNextSave = true
+
+    init(sources: [SkillSource]) {
+        self.configuration = SkillSourceConfiguration(sources: sources)
+    }
+
+    func loadSources() -> [SkillSource] {
+        configuration.sources
+    }
+
+    func save(_ sources: [SkillSource]) throws {
+        try save(
+            SkillSourceConfiguration(
+                sources: sources,
+                excludedAutomaticDirectoryURLs:
+                    configuration.excludedAutomaticDirectoryURLs
+            )
+        )
+    }
+
+    func loadConfiguration() -> SkillSourceConfiguration {
+        configuration
+    }
+
+    func save(_ configuration: SkillSourceConfiguration) throws {
+        if shouldFailNextSave {
+            shouldFailNextSave = false
+            throw SaveError()
+        }
+
+        self.configuration = configuration
     }
 }
 

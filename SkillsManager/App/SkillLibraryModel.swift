@@ -331,7 +331,19 @@ final class SkillLibraryModel {
         if let existingSource = sources.first(where: {
             $0.directoryURL.standardizedFileURL == normalizedURL
         }) {
+            let previousSidebarSelection = sidebarSelection
             sidebarSelection = .source(existingSource.id)
+
+            if excludedAutomaticDirectoryURLs.remove(normalizedURL) != nil {
+                do {
+                    try await persistSources()
+                } catch {
+                    excludedAutomaticDirectoryURLs.insert(normalizedURL)
+                    sidebarSelection = previousSidebarSelection
+                    throw error
+                }
+            }
+
             if sourceState(for: existingSource.id) == .unavailable {
                 try await recoverSource(existingSource.id, at: normalizedURL)
             }
@@ -357,6 +369,9 @@ final class SkillLibraryModel {
             throw error
         }
 
+        let previousExcludedAutomaticDirectoryURLs =
+            excludedAutomaticDirectoryURLs
+        excludedAutomaticDirectoryURLs.remove(normalizedURL)
         sources.append(source)
         sources = Self.sortedSources(sources)
         sourceStates[source.id] = .available
@@ -368,6 +383,8 @@ final class SkillLibraryModel {
             sources.removeAll { $0.id == source.id }
             sourceStates[source.id] = nil
             sourceAccess?.stopAccessing(sourceID: source.id)
+            excludedAutomaticDirectoryURLs =
+                previousExcludedAutomaticDirectoryURLs
             sidebarSelection = .allSkills
             throw error
         }
@@ -458,11 +475,22 @@ final class SkillLibraryModel {
     }
 
     func removeSource(_ sourceID: SkillSource.ID) async throws {
+        guard let removedSource = source(for: sourceID) else {
+            return
+        }
+
         let previousSources = sources
         let previousSkills = skills
         let previousSelection = selectedSkillIDs
         let previousSourceStates = sourceStates
         let previousSidebarSelection = sidebarSelection
+        let previousExcludedAutomaticDirectoryURLs =
+            excludedAutomaticDirectoryURLs
+
+        let removedDirectoryURL = removedSource.directoryURL.standardizedFileURL
+        if standardSourceDirectoryURLs.contains(removedDirectoryURL) {
+            excludedAutomaticDirectoryURLs.insert(removedDirectoryURL)
+        }
 
         sources.removeAll { $0.id == sourceID }
         skills.removeAll { $0.sourceID == sourceID }
@@ -482,6 +510,8 @@ final class SkillLibraryModel {
             sourceStates = previousSourceStates
             sidebarSelection = previousSidebarSelection
             selectedSkillIDs = previousSelection
+            excludedAutomaticDirectoryURLs =
+                previousExcludedAutomaticDirectoryURLs
             throw error
         }
     }
@@ -762,6 +792,14 @@ final class SkillLibraryModel {
                 agent: agent
             )
         }
+    }
+
+    private var standardSourceDirectoryURLs: Set<URL> {
+        Set(
+            standardSourceCandidates().map {
+                $0.directoryURL.standardizedFileURL
+            }
+        )
     }
 
     private func recoverSource(
