@@ -203,6 +203,110 @@ struct SkillLibraryModelTests {
         #expect(model.sourceState(for: persistedSource.id) == .available)
     }
 
+    @Test("Restoring automatically adds and scans existing standard agent folders")
+    func restoreAddsExistingStandardAgentFolders() async {
+        let homeDirectory = URL(
+            filePath: "/Users/reviewer",
+            directoryHint: .isDirectory
+        )
+        let claudeDirectory = URL(
+            filePath: "/Users/reviewer/.claude/skills",
+            directoryHint: .isDirectory
+        )
+        let cursorDirectory = URL(
+            filePath: "/Users/reviewer/.cursor/skills",
+            directoryHint: .isDirectory
+        )
+        let existingDirectories = Set([claudeDirectory, cursorDirectory])
+        let store = MemorySourceStore()
+        let model = makeModel(
+            sourceStore: store,
+            discoverer: FixtureDiscoverer(),
+            homeDirectory: homeDirectory,
+            directoryExists: { existingDirectories.contains($0.standardizedFileURL) }
+        )
+
+        await model.restoreSources()
+
+        #expect(model.sources.map(\.agent) == [.claudeCode, .cursor])
+        #expect(Set(model.sources.map(\.directoryURL)) == existingDirectories)
+        #expect(model.skills.count == 2)
+        #expect(model.sidebarSelection == .allSkills)
+        let persistedSources = await store.loadSources()
+        #expect(persistedSources == model.sources)
+    }
+
+    @Test("Restoring keeps one Global source for the shared Global and Codex folder")
+    func restoreDeduplicatesSharedStandardFolder() async throws {
+        let homeDirectory = URL(
+            filePath: "/Users/reviewer",
+            directoryHint: .isDirectory
+        )
+        let sharedDirectory = URL(
+            filePath: "/Users/reviewer/.agents/skills",
+            directoryHint: .isDirectory
+        )
+        let model = makeModel(
+            homeDirectory: homeDirectory,
+            directoryExists: {
+                $0.standardizedFileURL == sharedDirectory.standardizedFileURL
+            }
+        )
+
+        await model.restoreSources()
+
+        let source = try #require(model.sources.first)
+        #expect(model.sources.count == 1)
+        #expect(source.agent == .global)
+        #expect(source.directoryURL == sharedDirectory)
+    }
+
+    @Test("A persisted standard folder wins over automatic detection")
+    func restoreDoesNotDuplicatePersistedStandardFolder() async throws {
+        let homeDirectory = URL(
+            filePath: "/Users/reviewer",
+            directoryHint: .isDirectory
+        )
+        let claudeDirectory = URL(
+            filePath: "/Users/reviewer/.claude/skills",
+            directoryHint: .isDirectory
+        )
+        let persistedSource = SkillSource(
+            name: "My Claude Skills",
+            directoryURL: claudeDirectory,
+            agent: .other
+        )
+        let model = makeModel(
+            sourceStore: MemorySourceStore(sources: [persistedSource]),
+            homeDirectory: homeDirectory,
+            directoryExists: {
+                $0.standardizedFileURL == claudeDirectory.standardizedFileURL
+            }
+        )
+
+        await model.restoreSources()
+
+        let source = try #require(model.sources.first)
+        #expect(model.sources.count == 1)
+        #expect(source == persistedSource)
+    }
+
+    @Test("An unavailable account home suppresses automatic folder detection")
+    func restoreWithoutHomeDoesNotAddAutomaticFolders() async {
+        let store = MemorySourceStore()
+        let model = makeModel(
+            sourceStore: store,
+            homeDirectory: nil,
+            directoryExists: { _ in true }
+        )
+
+        await model.restoreSources()
+
+        #expect(model.sources.isEmpty)
+        let persistedSources = await store.loadSources()
+        #expect(persistedSources.isEmpty)
+    }
+
     @Test("A scan failure keeps a newly added directory available for recovery")
     func keepsAddedSourceWhenInitialScanFails() async throws {
         let store = MemorySourceStore()
@@ -691,13 +795,17 @@ struct SkillLibraryModelTests {
 
     private func makeModel(
         sourceStore: any SkillSourceStore = MemorySourceStore(),
-        discoverer: any SkillDiscovering = EmptyDiscoverer()
+        discoverer: any SkillDiscovering = EmptyDiscoverer(),
+        homeDirectory: URL? = nil,
+        directoryExists: @escaping @Sendable (URL) -> Bool = { _ in false }
     ) -> SkillLibraryModel {
         SkillLibraryModel(
             sourceStore: sourceStore,
             discoverer: discoverer,
             bookmarker: StubBookmarker(),
-            sourceAccess: StubSourceAccess()
+            sourceAccess: StubSourceAccess(),
+            homeDirectory: homeDirectory,
+            directoryExists: directoryExists
         )
     }
 }

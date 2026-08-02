@@ -65,8 +65,11 @@ final class SkillLibraryModel {
     @ObservationIgnored private let bookmarker: (any SkillSourceBookmarking)?
     @ObservationIgnored private let sourceAccess: (any SkillSourceAccessing)?
     @ObservationIgnored private let skillManager: (any SkillManaging)?
+    @ObservationIgnored private let homeDirectory: URL?
+    @ObservationIgnored private let directoryExists: @Sendable (URL) -> Bool
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private var hasRestoredSources = false
+    @ObservationIgnored private var excludedAutomaticDirectoryURLs: Set<URL> = []
 
     init(
         sources: [SkillSource] = [],
@@ -76,6 +79,8 @@ final class SkillLibraryModel {
         bookmarker: (any SkillSourceBookmarking)? = nil,
         sourceAccess: (any SkillSourceAccessing)? = nil,
         skillManager: (any SkillManaging)? = nil,
+        homeDirectory: URL? = nil,
+        directoryExists: @escaping @Sendable (URL) -> Bool = { _ in false },
         sortOrder: SkillSortOrder = .name,
         now: @escaping () -> Date = { .now }
     ) {
@@ -87,6 +92,8 @@ final class SkillLibraryModel {
         self.bookmarker = bookmarker
         self.sourceAccess = sourceAccess
         self.skillManager = skillManager
+        self.homeDirectory = homeDirectory?.standardizedFileURL
+        self.directoryExists = directoryExists
         self.now = now
         self.sourceStates = Dictionary(
             uniqueKeysWithValues: sortedSources.map { ($0.id, .available) }
@@ -221,12 +228,14 @@ final class SkillLibraryModel {
         }
 
         do {
-            var restoredSources = try await sourceStore.loadSources()
+            let configuration = try await sourceStore.loadConfiguration()
+            var restoredSources = configuration.sources
+            var restoredSourceStates: [SkillSource.ID: SourceState] = [:]
             var didRefreshBookmark = false
 
             for index in restoredSources.indices {
                 let sourceID = restoredSources[index].id
-                sourceStates[sourceID] = .available
+                restoredSourceStates[sourceID] = .available
 
                 guard
                     let bookmarkData = restoredSources[index].bookmarkData,
@@ -240,7 +249,7 @@ final class SkillLibraryModel {
                     restoredSources[index].directoryURL = resolved.url
 
                     if sourceAccess?.beginAccessing(resolved.url, for: sourceID) == false {
-                        sourceStates[sourceID] = .unavailable
+                        restoredSourceStates[sourceID] = .unavailable
                     }
 
                     if resolved.isStale {
@@ -249,15 +258,53 @@ final class SkillLibraryModel {
                         didRefreshBookmark = true
                     }
                 } catch {
-                    sourceStates[sourceID] = .unavailable
+                    restoredSourceStates[sourceID] = .unavailable
                 }
             }
 
-            sources = Self.sortedSources(restoredSources)
-
-            if didRefreshBookmark {
-                try await sourceStore.save(sources)
+            let configuredDirectoryURLs = Set(
+                restoredSources.map { $0.directoryURL.standardizedFileURL }
+            )
+            let normalizedExclusions = Set(
+                configuration.excludedAutomaticDirectoryURLs.map(\.standardizedFileURL)
+            )
+            let reconciledExclusions = normalizedExclusions.subtracting(
+                configuredDirectoryURLs
+            )
+            var mergedDirectoryURLs = configuredDirectoryURLs
+            let automaticSources = automaticSourceCandidates().filter { candidate in
+                let directoryURL = candidate.directoryURL.standardizedFileURL
+                guard reconciledExclusions.contains(directoryURL) == false else {
+                    return false
+                }
+                return mergedDirectoryURLs.insert(directoryURL).inserted
             }
+
+            restoredSources.append(contentsOf: automaticSources)
+            for source in automaticSources {
+                restoredSourceStates[source.id] = .available
+            }
+
+            let sortedRestoredSources = Self.sortedSources(restoredSources)
+            let didReconcileExclusions =
+                reconciledExclusions
+                != configuration.excludedAutomaticDirectoryURLs
+
+            if didRefreshBookmark
+                || automaticSources.isEmpty == false
+                || didReconcileExclusions
+            {
+                try await sourceStore.save(
+                    SkillSourceConfiguration(
+                        sources: sortedRestoredSources,
+                        excludedAutomaticDirectoryURLs: reconciledExclusions
+                    )
+                )
+            }
+
+            sources = sortedRestoredSources
+            sourceStates = restoredSourceStates
+            excludedAutomaticDirectoryURLs = reconciledExclusions
 
             for source in sources
             where source.isEnabled && sourceState(for: source.id) == .available {
@@ -680,7 +727,41 @@ final class SkillLibraryModel {
     }
 
     private func persistSources() async throws {
-        try await sourceStore?.save(sources)
+        try await sourceStore?.save(
+            SkillSourceConfiguration(
+                sources: sources,
+                excludedAutomaticDirectoryURLs: excludedAutomaticDirectoryURLs
+            )
+        )
+    }
+
+    private func automaticSourceCandidates() -> [SkillSource] {
+        var discoveredDirectoryURLs: Set<URL> = []
+
+        return standardSourceCandidates().filter { source in
+            let directoryURL = source.directoryURL.standardizedFileURL
+            return directoryExists(directoryURL)
+                && discoveredDirectoryURLs.insert(directoryURL).inserted
+        }
+    }
+
+    private func standardSourceCandidates() -> [SkillSource] {
+        guard let homeDirectory else {
+            return []
+        }
+
+        return SkillAgent.allCases.compactMap { agent in
+            guard let directoryURL = agent.defaultSkillsDirectory(in: homeDirectory) else {
+                return nil
+            }
+
+            let normalizedURL = directoryURL.standardizedFileURL
+            return SkillSource(
+                name: normalizedURL.lastPathComponent,
+                directoryURL: normalizedURL,
+                agent: agent
+            )
+        }
     }
 
     private func recoverSource(
