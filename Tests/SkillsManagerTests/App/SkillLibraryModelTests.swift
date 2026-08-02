@@ -1644,6 +1644,7 @@ private actor SuspendingDiscoverer: SkillDiscovering {
         return [
             AgentSkill(
                 name: "Late Skill",
+                summary: "Late Skill summary",
                 directoryURL: source.directoryURL.appending(path: "late"),
                 sourceID: source.id
             )

@@ -366,6 +366,7 @@ final class SkillLibraryModel {
                 canonicalDirectoryURL(for: $0.directoryURL) == directoryKey
             }) {
                 let previousSidebarSelection = sidebarSelection
+                let previousSelectedSkillIDs = selectedSkillIDs
                 sidebarSelection = .source(existingSource.id)
 
                 if excludedAutomaticDirectoryURLs.remove(directoryKey) != nil {
@@ -374,6 +375,7 @@ final class SkillLibraryModel {
                     } catch {
                         excludedAutomaticDirectoryURLs.insert(directoryKey)
                         sidebarSelection = previousSidebarSelection
+                        selectedSkillIDs = previousSelectedSkillIDs
                         throw error
                     }
                 }
@@ -403,6 +405,8 @@ final class SkillLibraryModel {
                 throw error
             }
 
+            let previousSidebarSelection = sidebarSelection
+            let previousSelectedSkillIDs = selectedSkillIDs
             let previousExcludedAutomaticDirectoryURLs =
                 excludedAutomaticDirectoryURLs
             excludedAutomaticDirectoryURLs.remove(directoryKey)
@@ -419,7 +423,8 @@ final class SkillLibraryModel {
                 sourceAccess?.stopAccessing(sourceID: source.id)
                 excludedAutomaticDirectoryURLs =
                     previousExcludedAutomaticDirectoryURLs
-                sidebarSelection = .allSkills
+                sidebarSelection = previousSidebarSelection
+                selectedSkillIDs = previousSelectedSkillIDs
                 throw error
             }
 
@@ -886,6 +891,7 @@ final class SkillLibraryModel {
     ) async rethrows -> Result {
         await beginSourceMutation()
         defer { finishSourceMutation() }
+        try Task.checkCancellation()
         return try await mutation()
     }
 

@@ -97,7 +97,7 @@ public actor JSONSkillSourceStore: SkillSourceStore {
     }
 
     public func save(_ sources: [SkillSource]) throws {
-        let configuration = try loadConfigurationFromDisk()
+        let configuration = (try? loadConfigurationFromDisk()) ?? SkillSourceConfiguration()
         try saveConfigurationToDisk(
             SkillSourceConfiguration(
                 sources: sources,
