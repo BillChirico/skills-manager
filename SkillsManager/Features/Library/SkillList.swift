@@ -131,7 +131,7 @@ struct SkillList: View {
                     await model.updateSkills([skill.id])
                 }
             }
-            .disabled(model.isMutating(skill.id))
+            .disabled(true)
         }
 
         Button(
@@ -349,5 +349,8 @@ private struct EmptyContent {
     let title: String
     let systemImage: String
     let description: String
+    let action: Action?
+}
+ing
     let action: Action?
 }

@@ -138,7 +138,7 @@ struct SkillDetail: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(model.isMutating(skill.id))
+                .disabled(true)
             }
 
             Button(skill.isEnabled ? "Disable" : "Enable") {
