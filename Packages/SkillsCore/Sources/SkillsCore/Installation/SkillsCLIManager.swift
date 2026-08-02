@@ -746,7 +746,7 @@ public actor SkillsCLIManager: SkillManaging {
             let attributes = try? FileManager.default.attributesOfItem(atPath: path),
             let type = attributes[.type] as? FileAttributeType
         else {
-            return .missing
+            return FileManager.default.fileExists(atPath: path) ? .other : .missing
         }
 
         switch type {

@@ -1039,7 +1039,7 @@ private actor FailingThenSucceedingCommandRunner: ProcessCommandRunning {
         self.sourceDirectory = sourceDirectory
     }
 
-    func run(_ command: ProcessCommand) throws {
+    func run(_ command: ProcessCommand) async throws {
         commandCount += 1
         if commandCount == 1 {
             throw SkillsCLIError.commandTimedOut
