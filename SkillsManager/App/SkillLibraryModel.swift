@@ -19,9 +19,15 @@ final class SkillLibraryModel {
 
     enum SourceAccessError: LocalizedError, Equatable {
         case accessDenied
+        case directoryAlreadyConfigured
 
         var errorDescription: String? {
-            "Skills Manager could not access the selected directory."
+            switch self {
+            case .accessDenied:
+                "Skills Manager could not access the selected directory."
+            case .directoryAlreadyConfigured:
+                "That directory is already configured as another source."
+            }
         }
     }
 
@@ -71,7 +77,11 @@ final class SkillLibraryModel {
     @ObservationIgnored private var hasRestoredSources = false
     @ObservationIgnored private var excludedAutomaticDirectoryURLs: Set<URL> = []
     @ObservationIgnored private var sourceMutationIsRunning = false
-    @ObservationIgnored private var sourceMutationWaiters: [CheckedContinuation<Void, Never>] = []
+    @ObservationIgnored private struct SourceMutationWaiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Void, Never>
+    }
+    @ObservationIgnored private var sourceMutationWaiters: [SourceMutationWaiter] = []
 
     init(
         sources: [SkillSource] = [],
@@ -220,7 +230,9 @@ final class SkillLibraryModel {
     }
 
     func restoreSources() async {
-        let sourcesToScan = await withSerializedSourceMutation { () -> [SkillSource] in
+        let sourcesToScan: [SkillSource]
+        do {
+            sourcesToScan = try await withSerializedSourceMutation { () -> [SkillSource] in
             guard hasRestoredSources == false else {
                 return []
             }
@@ -341,6 +353,8 @@ final class SkillLibraryModel {
                 report(error, title: "Unable to Restore Directories")
                 return []
             }
+        } catch is CancellationError {
+            return
         }
 
         for source in sourcesToScan {
@@ -883,21 +897,37 @@ final class SkillLibraryModel {
 
     private func withSerializedSourceMutation<Result>(
         _ mutation: () async throws -> Result
-    ) async rethrows -> Result {
-        await beginSourceMutation()
+    ) async throws -> Result {
+        try await beginSourceMutation()
         defer { finishSourceMutation() }
+        try Task.checkCancellation()
         return try await mutation()
     }
 
-    private func beginSourceMutation() async {
+    private func beginSourceMutation() async throws {
         guard sourceMutationIsRunning else {
             sourceMutationIsRunning = true
             return
         }
 
-        await withCheckedContinuation { continuation in
-            sourceMutationWaiters.append(continuation)
+        let waiterID = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                sourceMutationWaiters.append(
+                    SourceMutationWaiter(id: waiterID, continuation: continuation)
+                )
+            }
+        } onCancel: {
+            cancelSourceMutationWaiter(waiterID)
         }
+    }
+
+    private func cancelSourceMutationWaiter(_ waiterID: UUID) {
+        guard let index = sourceMutationWaiters.firstIndex(where: { $0.id == waiterID }) else {
+            return
+        }
+        let waiter = sourceMutationWaiters.remove(at: index)
+        waiter.continuation.resume(throwing: CancellationError())
     }
 
     private func finishSourceMutation() {
@@ -906,7 +936,7 @@ final class SkillLibraryModel {
             return
         }
 
-        sourceMutationWaiters.removeFirst().resume()
+        sourceMutationWaiters.removeFirst().continuation.resume()
     }
 
     private func automaticSourceCandidates() -> [SkillSource] {
@@ -968,6 +998,13 @@ final class SkillLibraryModel {
 
         let previousSource = sources[sourceIndex]
         let previousState = sourceStates[sourceID]
+        let directoryKey = canonicalDirectoryURL(for: directoryURL)
+        guard sources.indices.allSatisfy({ index in
+            index == sourceIndex
+                || canonicalDirectoryURL(for: sources[index].directoryURL) != directoryKey
+        }) else {
+            throw SourceAccessError.directoryAlreadyConfigured
+        }
         let accessGranted =
             sourceAccess?.beginAccessing(directoryURL, for: sourceID) ?? true
 
