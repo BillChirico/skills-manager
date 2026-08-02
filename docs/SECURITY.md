@@ -142,6 +142,29 @@ the external Node/npm process requires executable, network, and standard agent
 directory access; restoring App Sandbox requires a separately reviewed helper
 design.
 
+## Unsigned CI distribution
+
+The current main-branch CI artifact is explicitly named
+`SkillsManager-unsigned.dmg`. Its Release archive is built with
+`CODE_SIGNING_ALLOWED=NO`, and validation rejects an app bundle containing a
+`Contents/_CodeSignature` directory. The workflow has no Developer ID
+certificate, App Store Connect credential, signing step, notarization step, or
+stapled Apple ticket.
+
+Hardened Runtime remains an app build setting, but it does not authenticate an
+unsigned artifact or replace signing and notarization. macOS Gatekeeper can
+warn about or block the DMG or app. Documentation identifies that limitation
+and does not recommend disabling Gatekeeper or clearing quarantine metadata.
+The artifact is a transparent development distribution, not a trusted public
+release channel.
+
+The GitHub workflow has only `contents: read`, disables persisted checkout
+credentials, pins upload code to a full commit SHA, validates the DMG before
+upload, and retains it for 30 days. A production release path requires a new
+security review covering certificate import and cleanup, secret scope, signing
+identity selection, notarization submission and result verification, ticket
+stapling, signed-artifact validation, and credential rotation.
+
 ## Accepted residual risk
 
 These controls deliberately do not claim a complete software-supply-chain or

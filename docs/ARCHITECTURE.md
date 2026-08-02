@@ -275,6 +275,32 @@ semantic backgrounds; Liquid Glass is reserved for interactive controls. Busy,
 paused, scanning, and unavailable states use accessible text or labels rather
 than color alone.
 
+## CI and unsigned DMG distribution
+
+`.github/workflows/ci.yml` retains one ordered validation job for pull requests
+and pushes to `main`. Both event types regenerate the project, test, lint, and
+exercise the packaging scripts with controlled tool fakes. Only a successful
+push to `main` continues through a real unsigned Release archive, mounted-image
+validation, and artifact upload. Keeping those steps in the same job makes the
+existing checks a direct gate on distribution without duplicating runner setup.
+
+`scripts/build-unsigned-dmg.sh` owns the `xcodebuild archive` contract and DMG
+layout. It builds with `CODE_SIGNING_ALLOWED=NO` in a private temporary workspace,
+copies the app as `Skills Manager.app`, adds the `/Applications` shortcut, and
+writes only the requested DMG output. `scripts/verify-unsigned-dmg.sh` owns the
+consumer-visible image contract: `hdiutil verify`, a read-only mount, executable
+and property-list checks, absence of the bundle signature directory, exact
+shortcut validation, and detach. `make packaging-test`, `make dmg`, and
+`make verify-dmg` are the stable contributor and CI interfaces.
+
+The uploaded `SkillsManager-unsigned.dmg` is a 30-day workflow artifact, not a
+signed release. The workflow contains no Apple credentials and has read-only
+repository permissions. Future Developer ID signing belongs after archive
+creation; notarization and ticket stapling belong after the signed DMG is
+created and before its final validation/upload. Adding either is a separate
+release-architecture and security review, not an implicit extension of the
+unsigned script.
+
 ## Project generation
 
 `project.yml` is authoritative and `SkillsManager.xcodeproj` is committed for
