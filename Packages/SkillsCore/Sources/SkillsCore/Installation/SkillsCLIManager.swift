@@ -95,7 +95,7 @@ struct FoundationProcessCommandRunner: ProcessCommandRunning {
         )
         let captureTask = outputCapture.map { capture in
             Task.detached(priority: .utility) {
-                try capture.collect(execution: execution)
+                try await capture.collect(execution: execution)
             }
         }
 
@@ -125,6 +125,7 @@ struct FoundationProcessCommandRunner: ProcessCommandRunning {
         } catch {
             outputCapture?.cancel()
             if let captureTask {
+                captureTask.cancel()
                 _ = await captureTask.result
             }
             throw error
@@ -149,31 +150,61 @@ private final class BoundedProcessOutputCapture: @unchecked Sendable {
         self.outputFile = try FileHandle(forWritingTo: outputURL)
     }
 
-    func collect(execution: ProcessExecution) throws -> Data {
+    func collect(execution: ProcessExecution) async throws -> Data {
         defer { try? pipe.fileHandleForReading.close() }
-        var output = Data()
-
-        do {
-            while let chunk = try pipe.fileHandleForReading.read(upToCount: 8_192),
-                chunk.isEmpty == false
-            {
-                guard
-                    output.count <= maximumBytes,
-                    chunk.count <= maximumBytes - output.count
-                else {
-                    execution.requestStop(because: .updateCheckOutputInvalid)
-                    throw SkillsCLIError.updateCheckOutputInvalid
-                }
-                output.append(chunk)
-            }
-        } catch let error as SkillsCLIError {
-            throw error
-        } catch {
+        let descriptor = pipe.fileHandleForReading.fileDescriptor
+        let descriptorFlags = fcntl(descriptor, F_GETFL)
+        guard
+            descriptorFlags >= 0,
+            fcntl(descriptor, F_SETFL, descriptorFlags | O_NONBLOCK) >= 0
+        else {
             execution.requestStop(because: .updateCheckOutputInvalid)
             throw SkillsCLIError.updateCheckOutputInvalid
         }
 
-        return output
+        var output = Data()
+        var buffer = [UInt8](repeating: 0, count: 8_192)
+
+        while true {
+            try Task.checkCancellation()
+            let bytesRead = buffer.withUnsafeMutableBytes { rawBuffer in
+                #if canImport(Darwin)
+                    Darwin.read(descriptor, rawBuffer.baseAddress, rawBuffer.count)
+                #elseif canImport(Glibc)
+                    Glibc.read(descriptor, rawBuffer.baseAddress, rawBuffer.count)
+                #else
+                    -1
+                #endif
+            }
+
+            if bytesRead > 0 {
+                guard
+                    output.count <= maximumBytes,
+                    bytesRead <= maximumBytes - output.count
+                else {
+                    execution.requestStop(because: .updateCheckOutputInvalid)
+                    throw SkillsCLIError.updateCheckOutputInvalid
+                }
+                output.append(contentsOf: buffer.prefix(bytesRead))
+                continue
+            }
+
+            if bytesRead == 0 {
+                return output
+            }
+
+            let errorNumber = errno
+            if errorNumber == EINTR {
+                continue
+            }
+            if errorNumber == EAGAIN || errorNumber == EWOULDBLOCK {
+                try await Task.sleep(for: .milliseconds(10))
+                continue
+            }
+
+            execution.requestStop(because: .updateCheckOutputInvalid)
+            throw SkillsCLIError.updateCheckOutputInvalid
+        }
     }
 
     func persist(_ data: Data) throws {

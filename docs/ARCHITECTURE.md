@@ -187,12 +187,13 @@ process configuration, not a filesystem sandbox; the security document records
 the remaining ambient-access risk.
 
 The process runner opens the owner-only stdout file before launch, drains the
-child through a pipe while it executes, and enforces a 256 KiB ceiling; crossing
-it requests termination and fails closed. Standard input and error remain
-disconnected. After a zero exit, the runner persists through that already-open
-handle and returns the same bounded bytes, so the parser never reopens a pathname
-the child could replace. The manager requires UTF-8, removes only the exact ANSI
-sequences present in the reviewed transcript, and then accepts in order either:
+child through a nonblocking, cancellation-aware pipe while it executes, and
+enforces a 256 KiB ceiling; crossing it requests termination and fails closed.
+Standard input and error remain disconnected. After a zero exit, the runner
+persists through that already-open handle and returns the same bounded bytes, so
+the parser never reopens a pathname the child could replace. The manager requires
+UTF-8, removes only the exact ANSI sequences present in the reviewed transcript,
+and then accepts in order either:
 
 - one header, every expected lock source exactly once, and the all-current line;
   or

@@ -109,8 +109,9 @@ forwarded. The reviewed upstream path is directed into the disposable tree and
 receives no explicit path to a real skill installation; this process
 configuration is containment, not a filesystem sandbox. Standard input and
 error remain disconnected. The runner opens the owner-only stdout file before
-launch, drains the process through a pipe, and caps it at 256 KiB; exceeding the
-cap stops the direct process and produces no availability result.
+launch, drains the process through a nonblocking, cancellation-aware pipe, and
+caps it at 256 KiB; exceeding the cap stops the direct process and produces no
+availability result.
 
 After a zero exit, the runner persists through the already-open file handle and
 returns those same bounded bytes. The parser never reopens the child-writable
