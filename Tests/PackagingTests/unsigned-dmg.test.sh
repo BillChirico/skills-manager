@@ -163,6 +163,30 @@ grep -F -- '-configuration Release' "$fake_log/xcodebuild.args" > /dev/null
 grep -F -- 'CODE_SIGNING_ALLOWED=NO' "$fake_log/xcodebuild.args" > /dev/null
 grep -F -- 'archive' "$fake_log/xcodebuild.args" > /dev/null
 
+mkdir -p "$dmg_path.contents/Skills Manager.app/Contents/_CodeSignature"
+rm -f "$fake_log/detached"
+if bash scripts/verify-unsigned-dmg.sh "$dmg_path" \
+  > "$fake_log/signed-verification.stdout" \
+  2> "$fake_log/signed-verification.stderr"; then
+  echo 'verifier accepted an unexpectedly signed app bundle' >&2
+  exit 1
+fi
+grep -F -- 'unexpectedly contains a code-signature directory' \
+  "$fake_log/signed-verification.stderr" > /dev/null
+test -f "$fake_log/detached"
+rmdir "$dmg_path.contents/Skills Manager.app/Contents/_CodeSignature"
+
+rm -f "$dmg_path.contents/Applications" "$fake_log/detached"
+if bash scripts/verify-unsigned-dmg.sh "$dmg_path" \
+  > "$fake_log/layout-verification.stdout" \
+  2> "$fake_log/layout-verification.stderr"; then
+  echo 'verifier accepted a DMG without the Applications shortcut' >&2
+  exit 1
+fi
+grep -F -- 'does not contain an Applications symlink' \
+  "$fake_log/layout-verification.stderr" > /dev/null
+test -f "$fake_log/detached"
+
 if find "$fake_tmp" -mindepth 1 -maxdepth 1 -name 'skills-manager-dmg-*' -print -quit \
   | grep -q .; then
   echo 'packaging scripts left a temporary workspace behind' >&2
