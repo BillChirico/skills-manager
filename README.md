@@ -22,8 +22,8 @@ The current product surface includes:
   `skills` CLI;
 - name, date-added, and agent sorting, with the agent and source shown on every
   skill row;
-- real CLI-backed update and on-disk removal actions, plus controls for enabling,
-  revealing, opening, and copying the path of a skill;
+- CLI-backed on-disk removal and a fail-closed update action, plus controls for
+  enabling, revealing, opening, and copying the path of a skill;
 - directory rename, agent assignment, enable, rescan, reveal, and remove
   controls;
 - a resizable Settings folder list with native plus/minus management controls,
@@ -46,7 +46,7 @@ newer, with a material-based fallback on earlier supported versions.
 - macOS 15 or newer
 - Xcode 26 or newer
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) 2.46 or newer
-- Node.js 18 or newer with `npx` available through a standard installation path
+- Node.js 22.20 or newer with `npx` available through a standard installation path
 
 Install XcodeGen with Homebrew:
 
@@ -93,20 +93,24 @@ per selected directory and reports one outcome per directory, so one failure doe
 not stop the remaining installs. Successful installs are rescanned from disk and
 selected in the library.
 
-Update and remove actions use the same lifecycle boundary. Update invokes the
-CLI, then rescans all available sources because the CLI can reconcile shared lock
-state across agents. Remove deletes the successful skill directories from the
-library and disk, rescans affected sources, and leaves failed selections visible.
-Busy state prevents the same skill from receiving overlapping mutations.
+Update and remove actions use the same lifecycle boundary. The pinned upstream
+CLI can filter an update by skill and global/project scope, but release 1.5.21
+has no `--agent` option for update. Skills Manager therefore refuses update
+before process launch rather than risk changing the same skill in other agent
+directories. Reinstall from a reviewed source is the current safe refresh path.
+Remove deletes successful skill directories from the library and disk, rescans
+affected sources, and leaves failed selections visible. Busy state prevents the
+same skill from receiving overlapping mutations.
 
 ### The install command
 
 The detail view shows the `npx skills add …` command that skills.sh prints at the
 top of a skill page, with a copy action. App actions execute the official CLI
 directly as an executable plus argument vector; no shell parses the command and
-no remote string becomes executable syntax. The app supplies the CLI's
-non-interactive global, agent, and copy flags for installs, and the corresponding
-official update and remove forms for existing skills.
+no remote string becomes executable syntax. For app-initiated mutations, `npx`
+selects the audited `skills@1.5.21` package. The app adds non-interactive global,
+agent, and copy flags for installs, plus the agent-scoped remove form for
+existing skills.
 
 Catalog owners, repository names, slugs, local directory names, and leading
 options are validated before they can become process arguments. Dot-prefixed
@@ -116,17 +120,37 @@ supported agent's standard directory. Custom directories remain discoverable
 and readable but are not install, update, or remove targets.
 
 The child process receives a minimal environment containing the account home,
-the resolved `npx`/Node path, locale and temporary-directory settings, telemetry
-opt-outs, and non-interactive npm settings. Unrelated parent variables and secrets
-are not forwarded. Standard input and output are disconnected, and the app
-verifies the expected `SKILL.md` or directory state after the CLI exits.
+the validated absolute `npx`/Node directory plus fixed system executable
+directories, locale and temporary-directory settings, telemetry opt-outs, and
+non-interactive npm settings. Empty, relative, and delimiter-unsafe executable
+search locations are rejected. The app uses the public npm registry, disables
+lifecycle scripts, and runs from a new owner-only empty working directory.
+Unrelated parent variables, arbitrary inherited `PATH` entries, npm
+configuration, and secrets are not forwarded. Standard input and output are
+disconnected. A five-minute deadline and task cancellation stop the directly
+launched `npx` process, with a forced stop after a grace period. Descendant work
+started by that process is not supervised and may continue.
+
+Lifecycle paths may not contain symbolic links. Install requires its exact
+destination to be absent before launch, then requires a real destination
+directory and a regular, non-symbolic `SKILL.md`. The app snapshots source entry
+names before installation. On a nonzero exit, timeout, cancellation, or missing
+expected destination, the error lists at most ten sorted, escaped entry names
+observed so far, reports how many additional names were omitted, and leaves the
+entries on disk for review. This observation is not a final rollback report:
+unsupervised descendants or concurrent writers may add entries later, and the
+snapshot cannot identify changes inside directories that already existed.
+Remove requires the exact directory entry to be absent after launch, so a
+dangling symlink cannot satisfy a postcondition.
 
 This boundary prevents shell injection; it does not make third-party code
-trusted. `npx` may download and execute the npm-hosted `skills` package, and that
-CLI downloads community-authored skill content. The app therefore ships without
-App Sandbox so the child process can reach Node, the network, and supported agent
-directories. Install only from sources you trust and review `SKILL.md` before an
-agent uses it.
+trusted. `npx` may download and execute the pinned npm-hosted `skills` package,
+and that CLI downloads community-authored skill content. The app therefore ships
+without App Sandbox so the child process can reach Node, the network, and
+supported agent directories, but the target enables Hardened Runtime. Install
+only from sources you trust and review `SKILL.md` before an agent uses it. See
+[Security](docs/SECURITY.md) for the pinned package record, upstream limitation,
+and deliberately accepted residual risks.
 
 Text extracted from an installed `SKILL.md` is also untrusted. The library
 renders its overview as non-interactive text, so Markdown destinations do not
@@ -183,7 +207,8 @@ SkillsManager.xcodeproj/        generated, committed Xcode project
 
 See [Architecture](docs/ARCHITECTURE.md) for dependency boundaries and planned
 extension points. See [AGENTS.md](AGENTS.md) for repository conventions that
-apply to both human and AI contributors.
+apply to both human and AI contributors, and [Security](docs/SECURITY.md) for the
+CLI trust boundary.
 
 ## License
 

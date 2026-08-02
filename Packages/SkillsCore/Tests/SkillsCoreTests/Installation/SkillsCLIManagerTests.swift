@@ -40,6 +40,9 @@ struct SkillsCLIManagerTests {
         #expect(
             command.arguments == [
                 "--yes",
+                "--package",
+                "skills@1.5.21",
+                "--",
                 "skills",
                 "add",
                 "https://github.com/paulhudson/Swift-Testing-Pro",
@@ -53,10 +56,31 @@ struct SkillsCLIManagerTests {
             ]
         )
         #expect(command.executableURL == URL(filePath: "/usr/local/bin/npx"))
-        #expect(command.currentDirectoryURL == homeDirectory)
+        #expect(command.currentDirectoryURL != homeDirectory)
+        #expect(
+            FileManager.default.fileExists(
+                atPath: command.currentDirectoryURL.path(percentEncoded: false)
+            ) == false
+        )
         #expect(command.environment["HOME"] == homeDirectory.path(percentEncoded: false))
         #expect(command.environment["DISABLE_TELEMETRY"] == "1")
         #expect(command.environment["DO_NOT_TRACK"] == "1")
+        #expect(command.environment["GIT_CONFIG_GLOBAL"] == "/dev/null")
+        #expect(
+            command.environment["NPM_CONFIG_GLOBALCONFIG"]
+                == command.currentDirectoryURL.appending(
+                    path: "unused-global-npmrc",
+                    directoryHint: .notDirectory
+                ).path(percentEncoded: false)
+        )
+        #expect(command.environment["NPM_CONFIG_IGNORE_SCRIPTS"] == "true")
+        #expect(command.environment["NPM_CONFIG_PREFER_ONLINE"] == "true")
+        #expect(command.environment["NPM_CONFIG_REGISTRY"] == "https://registry.npmjs.org/")
+        #expect(command.environment["NPM_CONFIG_USERCONFIG"] == "/dev/null")
+        #expect(
+            command.environment["PATH"]
+                == "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        )
         #expect(command.environment["SECRET_TOKEN"] == nil)
         #expect(result == installedURL)
     }
@@ -104,11 +128,16 @@ struct SkillsCLIManagerTests {
                     directoryHint: .isDirectory
                 ).path(percentEncoded: false)
         )
+        let executableDirectoryPath = npxExecutableURL.deletingLastPathComponent().path(
+            percentEncoded: false
+        )
+        let expectedExecutableDirectory =
+            executableDirectoryPath.hasSuffix("/")
+            ? executableDirectoryPath.dropLast()
+            : Substring(executableDirectoryPath)
         #expect(
             command.environment["PATH"]?.split(separator: ":").first
-                == Substring(
-                    npxExecutableURL.deletingLastPathComponent().path(percentEncoded: false)
-                )
+                == expectedExecutableDirectory
         )
         #expect(result == installedURL)
     }
@@ -144,6 +173,46 @@ struct SkillsCLIManagerTests {
         )
 
         #expect(result == npxExecutableURL)
+    }
+
+    @Test("An npx directory containing the PATH delimiter fails closed")
+    func pathDelimitedNpxDirectoryIsRejected() async throws {
+        let temporaryDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let homeDirectory = temporaryDirectory.appending(path: "home", directoryHint: .isDirectory)
+        let source = try makeSource(agent: .claudeCode, homeDirectory: homeDirectory)
+        let unsafeNpxURL = temporaryDirectory.appending(
+            path: "Node:Tools/npx",
+            directoryHint: .notDirectory
+        )
+        let runner = RecordingCommandRunner()
+        let manager = SkillsCLIManager(
+            homeDirectory: homeDirectory,
+            runner: runner,
+            npxExecutableURL: unsafeNpxURL,
+            parentEnvironment: [:]
+        )
+
+        await #expect(throws: SkillsCLIError.unsafeNpxLocation) {
+            try await manager.install(makeCatalogSkill(), into: source)
+        }
+        #expect(await runner.commands.isEmpty)
+    }
+
+    @Test("npx discovery excludes relative inherited PATH entries")
+    func npxDiscoveryExcludesRelativeInheritedPathEntries() {
+        let result = SkillsCLIManager.inheritedExecutableDirectories(
+            from: "relative/bin:/usr/bin::./tools:/opt/node/bin"
+        )
+
+        #expect(
+            result
+                == [
+                    URL(filePath: "/usr/bin", directoryHint: .isDirectory),
+                    URL(filePath: "/opt/node/bin", directoryHint: .isDirectory),
+                ]
+        )
     }
 
     @Test("Remove verifies an unencoded skill directory path", .bug(id: 24))
@@ -205,8 +274,8 @@ struct SkillsCLIManagerTests {
                 ].suffix(5))
     }
 
-    @Test("Update uses the official global update command")
-    func updateCommand() async throws {
+    @Test("Update fails closed because the CLI cannot scope it to one agent")
+    func updateIsRejectedBeforeLaunch() async throws {
         let homeDirectory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: homeDirectory) }
 
@@ -215,19 +284,10 @@ struct SkillsCLIManagerTests {
         let runner = RecordingCommandRunner()
         let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
 
-        try await manager.update(skill, in: source)
-        let command = try #require(await runner.commands.first)
-
-        #expect(
-            command.arguments == [
-                "--yes",
-                "skills",
-                "update",
-                "swift-testing-pro",
-                "--global",
-                "--yes",
-            ])
-        #expect(command.environment["CODEX_HOME"] == nil)
+        await #expect(throws: SkillsCLIError.scopedUpdateUnsupported) {
+            try await manager.update(skill, in: source)
+        }
+        #expect(await runner.commands.isEmpty)
     }
 
     @Test("Remove uses the official agent-specific remove command")
@@ -248,6 +308,9 @@ struct SkillsCLIManagerTests {
         #expect(
             command.arguments == [
                 "--yes",
+                "--package",
+                "skills@1.5.21",
+                "--",
                 "skills",
                 "remove",
                 "swift-testing-pro",
@@ -351,10 +414,226 @@ struct SkillsCLIManagerTests {
         let runner = RecordingCommandRunner()
         let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
 
-        await #expect(throws: SkillsCLIError.expectedManifestMissing(manifestURL)) {
+        await #expect(
+            throws: SkillsCLIError.expectedManifestMissing(
+                manifestURL,
+                observedEntryNames: [],
+                additionalEntryCount: 0
+            )
+        ) {
             try await manager.install(makeCatalogSkill(), into: source)
         }
         #expect(await runner.commands.count == 1)
+    }
+
+    @Test("Install postcondition reports a capped, escaped entry delta")
+    func installPostconditionReportsCappedEscapedEntryDelta() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+
+        let source = try makeSource(agent: .claudeCode, homeDirectory: homeDirectory)
+        let expectedManifestURL = source.directoryURL
+            .appending(path: "swift-testing-pro", directoryHint: .isDirectory)
+            .appending(path: "SKILL.md", directoryHint: .notDirectory)
+        let observedEntryNames =
+            ["00-forged\nalert"]
+            + (1...11).map { String(format: "%02d-created-entry", $0) }
+        let preexistingDirectoryName = "preexisting-skill"
+        try Self.writeManifest(
+            in: source.directoryURL.appending(
+                path: preexistingDirectoryName,
+                directoryHint: .isDirectory
+            )
+        )
+        let runner = RecordingCommandRunner { _ in
+            for entryName in observedEntryNames {
+                try Self.writeManifest(
+                    in: source.directoryURL.appending(
+                        path: entryName,
+                        directoryHint: .isDirectory
+                    )
+                )
+            }
+        }
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+        let reportedEntryNames = Array(
+            observedEntryNames.sorted().prefix(SkillsCLIError.maximumReportedEntryNames)
+        )
+        let expectedError = SkillsCLIError.expectedManifestMissing(
+            expectedManifestURL,
+            observedEntryNames: reportedEntryNames,
+            additionalEntryCount: observedEntryNames.count - reportedEntryNames.count
+        )
+
+        await #expect(throws: expectedError) {
+            try await manager.install(makeCatalogSkill(), into: source)
+        }
+        let description = try #require(expectedError.errorDescription)
+        let firstObservedEntryName = try #require(observedEntryNames.first)
+        let finalObservedEntryName = try #require(observedEntryNames.last)
+        #expect(description.contains(String(reflecting: firstObservedEntryName)))
+        #expect(description.contains("\n") == false)
+        #expect(description.contains("(and 2 more)"))
+        #expect(description.contains(preexistingDirectoryName) == false)
+        #expect(
+            FileManager.default.fileExists(
+                atPath: source.directoryURL.appending(
+                    path: finalObservedEntryName,
+                    directoryHint: .isDirectory
+                ).path(percentEncoded: false)
+            )
+        )
+    }
+
+    @Test("Install reports entries observed before a nonzero exit")
+    func installCommandFailureReportsObservedEntries() async throws {
+        try await verifyInstallFailureReport(
+            runnerError: .commandFailed(exitCode: 23),
+            expectedFailure: .nonzeroExit(23)
+        )
+    }
+
+    @Test("Install reports entries observed before timeout")
+    func installTimeoutReportsObservedEntries() async throws {
+        try await verifyInstallFailureReport(
+            runnerError: .commandTimedOut,
+            expectedFailure: .timedOut
+        )
+    }
+
+    @Test("Install reports entries observed before cancellation")
+    func installCancellationReportsObservedEntries() async throws {
+        try await verifyInstallFailureReport(
+            runnerError: .commandCancelled,
+            expectedFailure: .cancelled
+        )
+    }
+
+    @Test("Install refuses a preexisting destination as an ambiguous postcondition")
+    func installRejectsPreexistingDestination() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+
+        let source = try makeSource(agent: .claudeCode, homeDirectory: homeDirectory)
+        let destinationURL = source.directoryURL.appending(
+            path: "swift-testing-pro",
+            directoryHint: .isDirectory
+        )
+        try Self.writeManifest(in: destinationURL)
+        let runner = RecordingCommandRunner()
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        await #expect(throws: SkillsCLIError.destinationAlreadyExists(destinationURL)) {
+            try await manager.install(makeCatalogSkill(), into: source)
+        }
+        #expect(await runner.commands.isEmpty)
+    }
+
+    @Test("Install rejects a dangling manifest symlink")
+    func installRejectsDanglingManifestSymlink() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+
+        let source = try makeSource(agent: .claudeCode, homeDirectory: homeDirectory)
+        let destinationURL = source.directoryURL.appending(
+            path: "swift-testing-pro",
+            directoryHint: .isDirectory
+        )
+        let manifestURL = destinationURL.appending(path: "SKILL.md")
+        let runner = RecordingCommandRunner { _ in
+            try FileManager.default.createDirectory(
+                at: destinationURL,
+                withIntermediateDirectories: true
+            )
+            try FileManager.default.createSymbolicLink(
+                at: manifestURL,
+                withDestinationURL: destinationURL.appending(path: "missing-manifest")
+            )
+        }
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        await #expect(throws: SkillsCLIError.symbolicLinkNotAllowed(manifestURL)) {
+            try await manager.install(makeCatalogSkill(), into: source)
+        }
+        #expect(await runner.commands.count == 1)
+    }
+
+    @Test("A symlink in a standard source path is rejected before launch")
+    func symbolicLinkSourceIsRejected() async throws {
+        let temporaryDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let homeDirectory = temporaryDirectory.appending(path: "home", directoryHint: .isDirectory)
+        let redirectedClaudeDirectory = temporaryDirectory.appending(
+            path: "redirected-claude",
+            directoryHint: .isDirectory
+        )
+        try FileManager.default.createDirectory(
+            at: redirectedClaudeDirectory.appending(path: "skills"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(at: homeDirectory, withIntermediateDirectories: true)
+        let linkURL = homeDirectory.appending(path: ".claude", directoryHint: .isDirectory)
+        try FileManager.default.createSymbolicLink(
+            at: linkURL,
+            withDestinationURL: redirectedClaudeDirectory
+        )
+
+        let source = try makeSource(agent: .claudeCode, homeDirectory: homeDirectory)
+        let runner = RecordingCommandRunner()
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        let normalizedLinkURL = URL(
+            filePath: linkURL.path(percentEncoded: false),
+            directoryHint: .notDirectory
+        )
+        await #expect(throws: SkillsCLIError.symbolicLinkNotAllowed(normalizedLinkURL)) {
+            try await manager.install(makeCatalogSkill(), into: source)
+        }
+        #expect(await runner.commands.isEmpty)
+    }
+
+    @Test("An installed skill directory cannot redirect removal through a symlink")
+    func symbolicLinkSkillIsRejected() async throws {
+        let temporaryDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let homeDirectory = temporaryDirectory.appending(path: "home", directoryHint: .isDirectory)
+        let source = try makeSource(agent: .claudeCode, homeDirectory: homeDirectory)
+        try FileManager.default.createDirectory(
+            at: source.directoryURL,
+            withIntermediateDirectories: true
+        )
+        let redirectedSkill = temporaryDirectory.appending(
+            path: "outside-skill",
+            directoryHint: .isDirectory
+        )
+        try Self.writeManifest(in: redirectedSkill)
+        let skillURL = source.directoryURL.appending(
+            path: "swift-testing-pro",
+            directoryHint: .isDirectory
+        )
+        try FileManager.default.createSymbolicLink(
+            at: skillURL,
+            withDestinationURL: redirectedSkill
+        )
+        let skill = AgentSkill(
+            name: "Swift Testing Pro",
+            summary: "Modern Swift Testing guidance",
+            directoryURL: skillURL,
+            sourceID: source.id
+        )
+        let runner = RecordingCommandRunner()
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        let normalizedSkillURL = URL(
+            filePath: skillURL.path(percentEncoded: false),
+            directoryHint: .notDirectory
+        )
+        await #expect(throws: SkillsCLIError.symbolicLinkNotAllowed(normalizedSkillURL)) {
+            try await manager.remove(skill, from: source)
+        }
+        #expect(await runner.commands.isEmpty)
     }
 
     @Test("Remove verifies that the CLI deleted the directory")
@@ -365,6 +644,28 @@ struct SkillsCLIManagerTests {
         let source = try makeSource(agent: .claudeCode, homeDirectory: homeDirectory)
         let skill = try makeInstalledSkill(in: source)
         let runner = RecordingCommandRunner()
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        await #expect(throws: SkillsCLIError.expectedDirectoryPresent(skill.directoryURL)) {
+            try await manager.remove(skill, from: source)
+        }
+        #expect(await runner.commands.count == 1)
+    }
+
+    @Test("A dangling directory symlink cannot satisfy remove's postcondition")
+    func removeRejectsDanglingDirectorySymlink() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+
+        let source = try makeSource(agent: .claudeCode, homeDirectory: homeDirectory)
+        let skill = try makeInstalledSkill(in: source)
+        let runner = RecordingCommandRunner { _ in
+            try FileManager.default.removeItem(at: skill.directoryURL)
+            try FileManager.default.createSymbolicLink(
+                at: skill.directoryURL,
+                withDestinationURL: source.directoryURL.appending(path: "missing-skill")
+            )
+        }
         let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
 
         await #expect(throws: SkillsCLIError.expectedDirectoryPresent(skill.directoryURL)) {
@@ -404,6 +705,58 @@ struct SkillsCLIManagerTests {
         }
     }
 
+    @Test("The Foundation runner terminates a command at its deadline")
+    func processTimeout() async throws {
+        let runner = FoundationProcessCommandRunner(
+            timeout: 0.05,
+            terminationGracePeriod: 0.05
+        )
+        let command = signalIgnoringCommand()
+        let clock = ContinuousClock()
+        let start = clock.now
+
+        await #expect(throws: SkillsCLIError.commandTimedOut) {
+            try await runner.run(command)
+        }
+
+        #expect(start.duration(to: clock.now) < .seconds(2))
+    }
+
+    @Test("Process errors disclose partial state and descendant risk")
+    func processErrorDescriptions() {
+        #expect(
+            SkillsCLIError.commandFailed(exitCode: 23).errorDescription
+                == "The skills CLI exited with status 23. Partial filesystem changes may remain."
+        )
+        #expect(
+            SkillsCLIError.commandTimedOut.errorDescription
+                == "The skills CLI exceeded its five-minute limit. Timeout handling targets only the directly launched process; work it already started may still continue."
+        )
+        #expect(
+            SkillsCLIError.commandCancelled.errorDescription
+                == "The skills CLI operation was cancelled. Cancellation targets only the directly launched process; work it already started may still continue."
+        )
+    }
+
+    @Test("Cancelling a task stops the directly launched process")
+    func processCancellation() async throws {
+        let runner = FoundationProcessCommandRunner(
+            timeout: 30,
+            terminationGracePeriod: 0.05
+        )
+        let command = longRunningCommand()
+        let task = Task {
+            try await runner.run(command)
+        }
+        try await Task.sleep(for: .milliseconds(50))
+
+        task.cancel()
+
+        await #expect(throws: SkillsCLIError.commandCancelled) {
+            try await task.value
+        }
+    }
+
     @Test("Lifecycle commands stay serialized while the process runner is suspended")
     func serializesCommands() async throws {
         let homeDirectory = try makeTemporaryDirectory()
@@ -412,13 +765,7 @@ struct SkillsCLIManagerTests {
         let source = try makeSource(agent: .claudeCode, homeDirectory: homeDirectory)
         let firstSkill = makeCatalogSkill(slug: "first-skill")
         let secondSkill = makeCatalogSkill(slug: "second-skill")
-        try Self.writeManifest(
-            in: source.directoryURL.appending(path: firstSkill.slug, directoryHint: .isDirectory)
-        )
-        try Self.writeManifest(
-            in: source.directoryURL.appending(path: secondSkill.slug, directoryHint: .isDirectory)
-        )
-        let runner = SuspendingCommandRunner()
+        let runner = SuspendingCommandRunner(sourceDirectory: source.directoryURL)
         let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
 
         let firstInstall = Task {
@@ -442,8 +789,86 @@ struct SkillsCLIManagerTests {
         #expect(await runner.commands.count == 2)
     }
 
+    @Test("A failed command releases the lifecycle operation gate")
+    func failureReleasesOperationGate() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+
+        let source = try makeSource(agent: .claudeCode, homeDirectory: homeDirectory)
+        let runner = FailingThenSucceedingCommandRunner(sourceDirectory: source.directoryURL)
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        await #expect(
+            throws: SkillsCLIError.installCommandFailed(
+                .timedOut,
+                observedEntryNames: [],
+                additionalEntryCount: 0
+            )
+        ) {
+            try await manager.install(makeCatalogSkill(slug: "first-skill"), into: source)
+        }
+        let installedURL = try await manager.install(
+            makeCatalogSkill(slug: "second-skill"),
+            into: source
+        )
+
+        #expect(installedURL.lastPathComponent == "second-skill")
+        #expect(await runner.commandCount == 2)
+    }
+
     private func makeCatalogSkill() -> CatalogSkill {
         makeCatalogSkill(slug: "swift-testing-pro")
+    }
+
+    private func verifyInstallFailureReport(
+        runnerError: SkillsCLIError,
+        expectedFailure: SkillsCLIError.InstallCommandFailure
+    ) async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+
+        let source = try makeSource(agent: .claudeCode, homeDirectory: homeDirectory)
+        let preexistingEntryName = "preexisting-entry"
+        try Self.writeManifest(
+            in: source.directoryURL.appending(
+                path: preexistingEntryName,
+                directoryHint: .isDirectory
+            )
+        )
+        let observedEntryNames =
+            ["00-partial\nentry"]
+            + (1...11).map { String(format: "%02d-partial-entry", $0) }
+        let runner = RecordingCommandRunner { _ in
+            for entryName in observedEntryNames {
+                try Self.writeManifest(
+                    in: source.directoryURL.appending(
+                        path: entryName,
+                        directoryHint: .isDirectory
+                    )
+                )
+            }
+            throw runnerError
+        }
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+        let reportedEntryNames = Array(
+            observedEntryNames.sorted().prefix(SkillsCLIError.maximumReportedEntryNames)
+        )
+        let expectedError = SkillsCLIError.installCommandFailed(
+            expectedFailure,
+            observedEntryNames: reportedEntryNames,
+            additionalEntryCount: observedEntryNames.count - reportedEntryNames.count
+        )
+
+        await #expect(throws: expectedError) {
+            try await manager.install(makeCatalogSkill(), into: source)
+        }
+        let description = try #require(expectedError.errorDescription)
+        let firstObservedEntryName = try #require(observedEntryNames.first)
+        #expect(description.contains("Entries observed so far:"))
+        #expect(description.contains(String(reflecting: firstObservedEntryName)))
+        #expect(description.contains("\n") == false)
+        #expect(description.contains("(and 2 more)"))
+        #expect(description.contains(preexistingEntryName) == false)
     }
 
     private func makeCatalogSkill(slug: String) -> CatalogSkill {
@@ -489,7 +914,7 @@ struct SkillsCLIManagerTests {
         )
     }
 
-    private static func writeManifest(in directoryURL: URL) throws {
+    fileprivate static func writeManifest(in directoryURL: URL) throws {
         try FileManager.default.createDirectory(
             at: directoryURL,
             withIntermediateDirectories: true
@@ -525,6 +950,24 @@ struct SkillsCLIManagerTests {
         )
         return directory
     }
+
+    private func longRunningCommand() -> ProcessCommand {
+        ProcessCommand(
+            executableURL: URL(filePath: "/bin/sh"),
+            arguments: ["-c", "exec sleep 30"],
+            environment: ["PATH": "/usr/bin:/bin"],
+            currentDirectoryURL: URL.temporaryDirectory
+        )
+    }
+
+    private func signalIgnoringCommand() -> ProcessCommand {
+        ProcessCommand(
+            executableURL: URL(filePath: "/bin/sh"),
+            arguments: ["-c", "trap '' TERM; while :; do :; done"],
+            environment: ["PATH": "/usr/bin:/bin"],
+            currentDirectoryURL: URL.temporaryDirectory
+        )
+    }
 }
 
 private struct FixtureError: Error {}
@@ -549,17 +992,31 @@ private actor RecordingCommandRunner: ProcessCommandRunning {
 
 private actor SuspendingCommandRunner: ProcessCommandRunning {
     private(set) var commands: [ProcessCommand] = []
+    private let sourceDirectory: URL
     private var firstContinuation: CheckedContinuation<Void, Never>?
+
+    init(sourceDirectory: URL) {
+        self.sourceDirectory = sourceDirectory
+    }
 
     func run(_ command: ProcessCommand) async throws {
         commands.append(command)
-        guard commands.count == 1 else {
-            return
+        if commands.count == 1 {
+            await withCheckedContinuation { continuation in
+                firstContinuation = continuation
+            }
         }
 
-        await withCheckedContinuation { continuation in
-            firstContinuation = continuation
+        guard
+            let skillOptionIndex = command.arguments.firstIndex(of: "--skill"),
+            command.arguments.indices.contains(skillOptionIndex + 1)
+        else {
+            throw FixtureError()
         }
+        let slug = command.arguments[skillOptionIndex + 1]
+        try SkillsCLIManagerTests.writeManifest(
+            in: sourceDirectory.appending(path: slug, directoryHint: .isDirectory)
+        )
     }
 
     func waitUntilFirstCommandStarted() async {
@@ -571,5 +1028,32 @@ private actor SuspendingCommandRunner: ProcessCommandRunning {
     func resumeFirstCommand() {
         firstContinuation?.resume()
         firstContinuation = nil
+    }
+}
+
+private actor FailingThenSucceedingCommandRunner: ProcessCommandRunning {
+    private(set) var commandCount = 0
+    private let sourceDirectory: URL
+
+    init(sourceDirectory: URL) {
+        self.sourceDirectory = sourceDirectory
+    }
+
+    func run(_ command: ProcessCommand) throws {
+        commandCount += 1
+        if commandCount == 1 {
+            throw SkillsCLIError.commandTimedOut
+        }
+
+        guard
+            let skillOptionIndex = command.arguments.firstIndex(of: "--skill"),
+            command.arguments.indices.contains(skillOptionIndex + 1)
+        else {
+            throw FixtureError()
+        }
+        let slug = command.arguments[skillOptionIndex + 1]
+        try SkillsCLIManagerTests.writeManifest(
+            in: sourceDirectory.appending(path: slug, directoryHint: .isDirectory)
+        )
     }
 }

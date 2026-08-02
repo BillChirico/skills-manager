@@ -76,19 +76,33 @@ remain separate, so clearing search returns to the session-cached leaderboard.
 
 ## Official CLI lifecycle
 
-Node.js 18 or newer and `npx` are runtime requirements. The manager resolves
-`npx` from the inherited `PATH`, common Homebrew and system paths, Volta, mise,
-asdf, nvm, and fnm locations. The resolved executable's directory leads the
-child `PATH` so an `npx` script can find its sibling `node`.
+Node.js 22.20 or newer and `npx` are runtime requirements for the pinned CLI.
+The manager resolves `npx` from absolute, delimiter-safe entries in the parent
+`PATH`, common Homebrew and system paths, Volta, mise, asdf, nvm, and fnm
+locations. Empty and relative inherited entries are discarded. The child does
+not inherit that `PATH`: the resolved executable's directory leads a new list
+containing only fixed Homebrew and system directories, so an `npx` script can
+find its sibling `node` without exposing unrelated executables. A resolved
+executable directory that is non-absolute or contains the `PATH` delimiter is
+rejected before launch.
 
 The manager launches `Process` directly. The executable URL and argument vector
-remain separate, and no operation uses a shell. Exact non-interactive forms are:
+remain separate, and no operation uses a shell. Package selection is explicit,
+and each invocation runs in a newly created owner-only empty directory. Exact
+non-interactive forms are:
 
 ```text
-npx --yes skills add <repository> --skill <slug> --global --agent <agent> --copy --yes
-npx --yes skills update <slug> --global --yes
-npx --yes skills remove <slug> --global --agent <agent> --yes
+npx --yes --package skills@1.5.21 -- skills add <repository> --skill <slug> --global --agent <agent> --copy --yes
+npx --yes --package skills@1.5.21 -- skills remove <slug> --global --agent <agent> --yes
 ```
+
+The official 1.5.21 update parser accepts `--global`, `--project`, `--yes`, and
+positional skill names, but no `--agent`. Its global implementation reads shared
+lock state and reinstalls through `add`, so a successful call cannot prove it
+mutated only the selected source. The app validates the selected source and skill
+then returns `scopedUpdateUnsupported` without launching a process. Reinstalling
+from a reviewed source is the supported refresh path until upstream exposes an
+agent-scoped contract.
 
 Supported mappings are:
 
@@ -102,23 +116,41 @@ Supported mappings are:
 | Gemini | `~/.gemini/skills` | `gemini-cli` | — |
 
 Before launch, the configured URL must exactly match the selected agent's
-standard directory. Installed skills must be direct children of that directory,
-and their directory names must pass catalog argument validation. Custom sources
-remain discoverable and readable but lifecycle changes return an actionable
-unsupported-source error. If the account home cannot be resolved, lifecycle
-operations fail closed before resolving `npx` or launching a process.
+standard directory. Existing components from the account home through the
+source, skill, and manifest may not be symbolic links. Installed skills must be
+real direct children of the source directory, and their directory names must
+pass catalog argument validation. Custom sources remain discoverable and
+readable but lifecycle changes return an actionable unsupported-source error. If
+the account home cannot be resolved, lifecycle operations fail closed before
+resolving `npx` or launching a process.
 
-The child environment is an allowlist: account home, a constructed executable
-path, locale and temporary-directory settings, telemetry opt-outs, and npm
-non-interactive settings. Unrelated variables and secrets are not forwarded.
+The child environment is an allowlist: account home, the constructed executable
+path, locale and temporary-directory settings, telemetry opt-outs, and explicit
+npm/Git settings. npm is fixed to `https://registry.npmjs.org/`, lifecycle scripts
+are disabled, online metadata is preferred, and user/global npm and Git
+configuration are ignored. Unrelated variables and secrets are not forwarded.
 Standard input, output, and error use the null device. A nonzero status becomes a
-typed error without exposing unbounded CLI output.
+typed error without exposing unbounded CLI output. The runner has a five-minute
+deadline, propagates task cancellation, sends termination first, and force-kills
+the directly launched `npx` process after a one-second grace period if it is
+still running. The liveness check and `SIGKILL` share one lock scope. Descendants
+are not placed in a supervised process group and may continue after the direct
+process exits; timeout and cancellation errors disclose this limit.
 
-After a zero status, the manager verifies a filesystem postcondition. Install and
-update require the expected `SKILL.md`; remove requires the directory to be
-absent, including a remaining symbolic-link entry. A private FIFO operation gate
-prevents actor reentrancy while the process runner is awaited, so lock-file
-mutations cannot overlap.
+Postconditions cannot be satisfied by stale state. Install requires the exact
+destination entry to be absent before launch and snapshots the source's entry
+names. After a zero status, the expected destination must be a real direct-child
+directory and `SKILL.md` must be a regular, non-symbolic file. A nonzero exit,
+timeout, cancellation, or failed install postcondition computes the source-name
+delta observed at that point. The error renders at most ten sorted names with
+`String(reflecting:)`, includes an omitted-name count, and leaves the entries on
+disk for inspection. "Observed so far" is intentionally not a final state:
+unsupervised descendants or concurrent writers may add entries later, and the
+snapshot cannot identify modifications inside entries that already existed or
+provide rollback. Remove requires the directory entry to be absent, including a
+dangling symbolic link, and the source boundary is revalidated after the process
+exits. A private FIFO operation gate prevents actor reentrancy while the process
+runner is awaited, so lock-file mutations cannot overlap.
 
 ## Lifecycle state and partial success
 
@@ -126,11 +158,11 @@ One selected destination or skill is one outcome. Catalog installation continues
 after a destination failure. Library update and removal likewise continue after
 an individual failure and present a concise combined error.
 
-Update rescans every enabled, available source after any success because the
-official CLI can reconcile shared state across agents. Removal immediately drops
-only successful IDs, then rescans sources that share the affected directory.
-Failed removals stay visible and selected. Views disable conflicting actions and
-show progress while IDs are in `mutatingSkillIDs`.
+The production manager currently returns an explicit failure for every update,
+so the model reports the upstream limitation and does not rescan on that path.
+Removal immediately drops only successful IDs, then rescans sources that share
+the affected directory. Failed removals stay visible and selected. Views disable
+conflicting actions and show progress while IDs are in `mutatingSkillIDs`.
 
 ## Trust boundaries
 
@@ -151,9 +183,14 @@ interactive destination in app chrome. Separately constructed external links
 must remain validated HTTPS actions.
 
 Direct arguments and a scrubbed environment prevent shell injection and secret
-leakage; they do not authenticate npm or skill publishers. `npx` can download and
-execute the npm-hosted `skills` package, and that CLI installs community content.
-The UI and README disclose this boundary and direct users to review `SKILL.md`.
+leakage. Lifecycle execution is pinned to `skills@1.5.21`, published from the
+signed upstream `v1.5.21` tag at commit
+`7cb7db64dc1201052dea305e508a2fc490f7e5e2`; its npm tarball integrity is recorded
+in `docs/SECURITY.md`. These controls do not independently authenticate npm
+registry responses, the locally resolved `npx` executable, transitive runtime
+dependencies, or skill publishers. The pinned CLI still installs community
+content. The UI and README disclose this boundary and direct users to review
+`SKILL.md`.
 
 ## Platform, filesystem, and visual policy
 
@@ -162,11 +199,13 @@ The deployment target is macOS 15. Liquid Glass is availability-gated to macOS
 no global accent-color asset or root tint, so native controls inherit the user's
 accent color.
 
-Skills Manager intentionally ships with `ENABLE_APP_SANDBOX=NO`. An external
-Node/npm child needs executable, network, and standard-agent-directory access,
-and it would inherit an App Sandbox that dynamic picker grants cannot reliably
-broaden. Reintroducing App Sandbox requires a separately designed and reviewed
-helper boundary.
+Skills Manager intentionally ships with `ENABLE_APP_SANDBOX=NO` and
+`ENABLE_HARDENED_RUNTIME=YES`. An external Node/npm child needs executable,
+network, and standard-agent-directory access, and it would inherit an App
+Sandbox that dynamic picker grants cannot reliably broaden. Hardened Runtime
+retains code-signing and runtime integrity protections that are compatible with
+the external process design. Reintroducing App Sandbox requires a separately
+designed and reviewed helper boundary.
 
 Configured source URLs are persisted in `sources.json` under Application Support.
 The JSON store creates an owner-only directory and file (`0700`/`0600`). Existing

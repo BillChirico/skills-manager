@@ -99,7 +99,8 @@ The app intentionally ships without App Sandbox because its required backend is
 an external Node/npm process that must reach supported agent directories. Do not
 describe the app as sandboxed or add security-scoped bookmark behavior to imply
 that the child process inherits a picker grant. Re-enabling App Sandbox requires
-a separately reviewed helper architecture, not an entitlement exception.
+a separately reviewed helper architecture, not an entitlement exception. Keep
+Hardened Runtime enabled for the app target even while App Sandbox is disabled.
 
 Never log skill contents, tokens, credentials, the inherited environment, CLI
 output, or user-specific absolute paths. Keep process standard input, output,
@@ -146,20 +147,49 @@ agent identifier and set `CODEX_HOME=~/.agents` so the official CLI targets that
 shared location. Fail closed before process launch when `UserHomeDirectory`
 cannot resolve the account home.
 
-Resolve `npx` from the inherited `PATH` and documented common Node version-manager
-locations. Put the resolved executable's directory first in the child's `PATH`
-so its sibling `node` is found. Child environments are allowlists: pass only the
-account home, the constructed path, locale and temporary-directory values,
-telemetry opt-outs, and npm non-interactive settings. Do not forward unrelated
-parent variables, proxy credentials, tokens, or secrets.
+Node.js 22.20 or newer is required by the pinned CLI. Resolve `npx` only from
+absolute, delimiter-safe entries in the parent `PATH` and documented common Node
+version-manager locations; discard empty and relative inherited entries, and
+never copy the parent `PATH` into the child. Put the resolved executable's
+directory first, followed only by the fixed Homebrew and system directories
+needed for Node and Git. Reject a non-absolute resolved executable directory or
+one containing the `PATH` delimiter instead of splitting it into unintended
+search locations. Child environments are allowlists: pass only the account home,
+that constructed path, locale and temporary-directory values, telemetry
+opt-outs, and explicit npm settings. Pin lifecycle execution to the reviewed
+`skills@1.5.21` package from `https://registry.npmjs.org/`, disable npm lifecycle
+scripts, ignore user/global npm configuration, and run from a fresh owner-only
+empty directory so a local package cannot shadow the selected binary. Do not
+forward unrelated parent variables, proxy credentials, tokens, or secrets.
 
 The shared `SkillsCLIManager` must serialize install, update, and remove calls so
-the CLI cannot race its own lock-file mutations. Verify filesystem postconditions
-after a zero exit status: install and update require `SKILL.md`; remove requires
-the skill directory to be absent. Treat each selected skill or destination as an
-independent outcome, preserve failures in the UI, and rescan disk after successes.
-Removal confirmation must say that files are deleted; never reuse the old
-non-destructive “Remove from Library” language for skill removal.
+the CLI cannot race its own lock-file mutations. Every directly launched process
+must have a finite deadline and stop promptly when its calling task is cancelled,
+escalating to a forced stop after the grace period. Keep the liveness check and
+`SIGKILL` in the same lock scope so a reaped pid cannot be reused between them.
+User-facing errors must disclose that unsupervised descendant work may continue.
+Reject symbolic links in every mutable source, skill, and manifest path before
+launch and verify the boundary again afterward. A new install destination must
+be absent before launch; afterward it must be a real direct-child directory
+containing a regular, non-symbolic `SKILL.md`. Snapshot source entry names before
+install. On a nonzero exit, timeout, cancellation, or failed postcondition,
+report at most ten sorted names observed since that snapshot plus the omitted
+count. Render each untrusted name with `String(reflecting:)` so control
+characters are escaped, call the delta "observed so far" because descendants may
+continue writing, and do not silently delete its entries. Do not claim this
+name-only delta detects changes inside preexisting entries or provides rollback.
+Remove requires the exact directory entry, including a dangling symlink, to be
+absent after a zero exit status.
+
+Upstream `skills@1.5.21` update accepts only global/project scope and skill-name
+filters; it has no agent selector. Do not invoke it from a per-source app action,
+because it can reconcile shared lock state outside the selected agent directory.
+Fail closed with `scopedUpdateUnsupported` until a separately reviewed upstream
+contract makes the mutation agent-scoped. Treat each selected skill or
+destination as an independent outcome, preserve failures in the UI, and rescan
+disk after successes. Removal confirmation must say that files are deleted;
+never reuse the old non-destructive “Remove from Library” language for skill
+removal.
 
 Treat text extracted from an installed `SKILL.md` as untrusted presentation
 input. Its library overview must remain non-interactive. Markdown styling may be

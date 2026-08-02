@@ -1,5 +1,12 @@
 # skills.sh CLI Lifecycle Implementation Plan
 
+> **Historical plan:** The implementation has since received a security
+> hardening amendment. Current behavior, including the pinned CLI, unavailable
+> agent-scoped update, symlink containment, process deadline/cancellation, and
+> Hardened Runtime, is authoritative in `docs/ARCHITECTURE.md` and
+> `docs/SECURITY.md`. Command examples below record the original plan and must
+> not be copied into production unchanged.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make `npx skills` the tested production backend for installing,
@@ -11,8 +18,8 @@ catalog installs and library mutations report per-target outcomes and rescan
 successful sources. Direct CLI execution requires changing the app from an App
 Sandbox product to a disclosed non-sandboxed developer tool.
 
-**Tech Stack:** Swift 6.2, Foundation `Process`, Observation, SwiftUI, Swift
-Testing, XcodeGen, macOS 15+
+**Tech Stack:** Swift 6.2 toolchain with Swift 6 language mode, Foundation
+`Process`, Observation, SwiftUI, Swift Testing, XcodeGen, macOS 15+
 
 ## Global Constraints
 
@@ -313,7 +320,7 @@ git commit -m "feat(library): update and remove skills through npx"
 **Interfaces:**
 
 - Produces: an unsandboxed app target capable of launching local `npx`.
-- Produces: user-facing and contributor-facing disclosure of Node.js 18+, CLI
+- Produces: user-facing and contributor-facing disclosure of Node.js 22.20+, CLI
   execution, standard-directory limitations, environment scrubbing, and review
   expectations.
 
@@ -345,7 +352,7 @@ with user permissions, and that users should review both the source and installe
 Document:
 
 ```text
-Requirements: macOS 15+, Xcode 26+, XcodeGen 2.46+, Node.js 18+ with npx
+Requirements: macOS 15+, Xcode 26+, XcodeGen 2.46+, Node.js 22.20+ with npx
 Lifecycle: npx skills add/update/remove, --copy, --global, non-interactive
 Supported mutations: configured standard directories for known agents
 Security: no shell, validated argv, scrubbed environment, telemetry disabled,
@@ -370,9 +377,10 @@ is empty.
 - [ ] **Step 6: Commit configuration and documentation**
 
 ```sh
-git add project.yml SkillsManager.xcodeproj SkillsManager/Support \
+git add project.yml SkillsManager.xcodeproj \
   SkillsManager/Features/Catalog/SkillCatalogView.swift README.md AGENTS.md \
   CLAUDE.md docs
+git add -A SkillsManager/Support
 git commit -m "docs: describe npx lifecycle trust boundary"
 ```
 

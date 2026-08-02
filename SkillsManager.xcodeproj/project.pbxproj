@@ -62,6 +62,7 @@
 		71E86521947227FAD14E43AA /* SkillsManager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SkillsManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		722F8D554E99C8E055634971 /* SkillSourceAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillSourceAccess.swift; sourceTree = "<group>"; };
 		798333DD8A836A78860F88DF /* SkillDetail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillDetail.swift; sourceTree = "<group>"; };
+		7F3256AD67D63F0F51359FC2 /* SECURITY.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = SECURITY.md; sourceTree = "<group>"; };
 		8091891E4D7B5CB7043BACC1 /* SkillAgent+Presentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillAgent+Presentation.swift"; sourceTree = "<group>"; };
 		8A6FD9583210F461B8C10058 /* SkillLibraryModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryModelTests.swift; sourceTree = "<group>"; };
 		9012D9D210AEF08DCBE01777 /* ARCHITECTURE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ARCHITECTURE.md; sourceTree = "<group>"; };
@@ -179,6 +180,7 @@
 			isa = PBXGroup;
 			children = (
 				9012D9D210AEF08DCBE01777 /* ARCHITECTURE.md */,
+				7F3256AD67D63F0F51359FC2 /* SECURITY.md */,
 				BB9D3C67CAFC2D97C1F841FD /* superpowers */,
 			);
 			path = docs;
@@ -449,6 +451,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Skills Manager";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
@@ -630,6 +633,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Skills Manager";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";

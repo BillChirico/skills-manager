@@ -3,8 +3,9 @@
 ## Goal
 
 Make the official `skills` CLI, launched through `npx`, the production backend
-for installing, updating, and removing skills. A successful app action must
-represent a successful on-disk mutation, not only an in-memory state change.
+for installing and removing skills. A successful app action must represent a
+successful on-disk mutation, not only an in-memory state change. Update must fail
+closed while the upstream CLI cannot scope that mutation to one agent.
 
 ## Current behavior and root cause
 
@@ -57,10 +58,12 @@ update, and remove operations. `SkillsCLIManager` will implement it and own:
 - validation that a configured source is that agent's standard account-level
   directory;
 - catalog and installed-skill argument validation;
-- `npx` discovery from the GUI process path and common Node installation paths;
-- a scrubbed child environment with telemetry disabled;
-- direct `Process` execution without a shell; and
-- post-command checks for the expected manifest or removed directory.
+- `npx` discovery from absolute, delimiter-safe GUI process path entries and
+  common Node installation paths;
+- an exact reviewed npm package version and scrubbed child environment;
+- direct, deadline-bound `Process` execution without a shell;
+- symlink-free lifecycle path containment; and
+- stale-state-resistant checks for the expected manifest or removed directory.
 
 The same manager instance is injected into `SkillCatalogModel` and
 `SkillLibraryModel`. Its actor isolation serializes lock-file mutations even
@@ -69,10 +72,14 @@ when separate UI scenes initiate work.
 The official non-interactive commands are:
 
 ```text
-npx --yes skills add <repository-url> --skill <slug> --global --agent <agent> --copy --yes
-npx --yes skills update <skill-directory-name> --global --yes
-npx --yes skills remove <skill-directory-name> --global --agent <agent> --yes
+npx --yes --package skills@1.5.21 -- skills add <repository-url> --skill <slug> --global --agent <agent> --copy --yes
+npx --yes --package skills@1.5.21 -- skills remove <skill-directory-name> --global --agent <agent> --yes
 ```
+
+The verified 1.5.21 update command has no `--agent` option and can act through
+shared global lock state. The manager therefore returns
+`scopedUpdateUnsupported` before launch. See `docs/SECURITY.md` for the upstream
+evidence and accepted residual risks.
 
 `global` and `codex` sources both represent `~/.agents/skills` in this product.
 They target the official `codex` agent while setting `CODEX_HOME=~/.agents`, so
@@ -89,8 +96,11 @@ destination-path option.
 
 1. The catalog model rejects empty destinations, unsafe catalog identifiers,
    and overlapping install requests.
-2. For each selected source, the CLI manager validates the target, launches the
-   official add command, and verifies `<source>/<slug>/SKILL.md` exists.
+2. For each selected source, the CLI manager snapshots source entry names,
+   validates the target, launches the official add command, and verifies
+   `<source>/<slug>/SKILL.md` exists. A nonzero exit, timeout, cancellation, or
+   failed postcondition reports a capped, escaped source-name delta observed so
+   far without deleting its entries.
 3. The catalog model returns one outcome per source so one failure does not hide
    successful destinations.
 4. The view rescans successful sources and selects the first installed skill.
@@ -99,12 +109,10 @@ destination-path option.
 
 1. The library model snapshots selected skills with updates and marks their IDs
    busy.
-2. The CLI manager runs one update command per selected skill and verifies its
-   manifest remains present.
-3. Because the CLI lock can link one skill to several agents, the model rescans
-   every enabled, available source after successful updates.
-4. Successful skills clear their cached `availableVersion`; failed skills stay
-   visible with their update badge and are summarized in an alert.
+2. The CLI manager validates the source and installed directory, then returns
+   `scopedUpdateUnsupported` without launching a process.
+3. The model keeps the skill and update badge visible and presents the safe
+   reinstall guidance.
 
 ### Remove
 
@@ -120,8 +128,14 @@ The UI tracks IDs participating in a CLI mutation and disables duplicate
 actions while they are active. No command output is written to the app log,
 because it may include user-specific paths or remote content. User-facing
 errors distinguish missing Node/npm tooling, unsupported destinations, unsafe
-identifiers, launch failures, nonzero CLI exits, and a command that exits zero
-without producing the expected filesystem result.
+identifiers or symlinks, unavailable scoped update, launch failures, timeout or
+cancellation (while disclosing unsupervised descendants), nonzero CLI exits, and
+a command that exits zero without producing the expected filesystem result. For
+every install failure after launch in the latter three categories, the error
+reports at most ten sorted names observed since the prelaunch snapshot, escapes
+control characters, and includes an omitted-name count. It does not claim a
+final state or rollback because descendants may keep writing and preexisting
+entries may have changed internally.
 
 All multi-skill and multi-directory operations preserve partial success. The
 alert names each failed skill or source rather than collapsing failures into a
@@ -138,18 +152,21 @@ telemetry opt-outs; unrelated process environment variables and credentials are
 not inherited.
 
 This change intentionally trades App Sandbox containment for official CLI
-behavior. `npx` downloads and executes npm package code with the user's normal
-permissions. Product and contributor documentation, plus the Discover detail,
-must state that requirement and trust boundary. The required Security Reviewer
-gate is especially important for this change.
+behavior while enabling Hardened Runtime. `npx` downloads and executes the
+pinned npm package with the user's normal permissions. Product and contributor
+documentation, plus the Discover detail, must state that requirement and trust
+boundary. The required Security Reviewer gate is especially important for this
+change.
 
 ## Testing
 
 Swift Testing coverage will use an injected command runner and temporary home
 directories. Tests will prove the exact argument vectors and environment,
 Codex home override, source and identifier rejection before process launch,
-nonzero exit propagation, filesystem postconditions, and install/update/remove
-partial-success behavior in the app models. Tests will not contact npm,
+nonzero exit, timeout, and cancellation reporting with escaped bounded entry
+deltas, descendant-risk wording, symlink containment, filesystem postconditions
+with unexpected-entry reporting, and install/update/remove partial-success
+behavior in the app models. Tests will not contact npm,
 skills.sh, GitHub, or a real user directory.
 
 The full handoff gate remains `make check` on macOS. A Linux Swift container may

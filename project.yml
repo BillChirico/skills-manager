@@ -49,6 +49,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         CURRENT_PROJECT_VERSION: 1
         ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: YES
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Skills Manager
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
