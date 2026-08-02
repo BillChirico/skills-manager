@@ -220,7 +220,7 @@ final class SkillLibraryModel {
     }
 
     func restoreSources() async {
-        let sourcesToScan = await withSerializedSourceMutation { () -> [SkillSource] in
+        let sourcesToScan = (try? await withSerializedSourceMutation { () -> [SkillSource] in
             guard hasRestoredSources == false else {
                 return []
             }
@@ -341,7 +341,7 @@ final class SkillLibraryModel {
                 report(error, title: "Unable to Restore Directories")
                 return []
             }
-        }
+        }) ?? []
 
         for source in sourcesToScan {
             do {
@@ -891,7 +891,7 @@ final class SkillLibraryModel {
 
     private func withSerializedSourceMutation<Result>(
         _ mutation: () async throws -> Result
-    ) async rethrows -> Result {
+    ) async throws -> Result {
         await beginSourceMutation()
         defer { finishSourceMutation() }
         try Task.checkCancellation()
