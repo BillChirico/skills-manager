@@ -75,6 +75,9 @@ private final class ProcessExecution: @unchecked Sendable {
         terminationGracePeriod: TimeInterval
     ) {
         let process = Process()
+        // Put the launcher and all descendants in a dedicated process group so
+        // cancellation cannot leave lifecycle writes running after the gate opens.
+        process.processGroupID = 0
         process.executableURL = command.executableURL
         process.arguments = command.arguments
         process.environment = command.environment
@@ -162,7 +165,13 @@ private final class ProcessExecution: @unchecked Sendable {
         let processIdentifier = process.processIdentifier
         lock.unlock()
 
-        process.terminate()
+        #if canImport(Darwin)
+            _ = Darwin.kill(-processIdentifier, SIGTERM)
+        #elseif canImport(Glibc)
+            _ = Glibc.kill(-processIdentifier, SIGTERM)
+        #else
+            process.terminate()
+        #endif
 
         let forceTerminationWorkItem = DispatchWorkItem { [self] in
             forceTerminateIfNeeded(processIdentifier: processIdentifier)
@@ -731,6 +740,7 @@ public actor SkillsCLIManager: SkillManaging {
         case directory
         case regularFile
         case other
+        case inspectionFailed
     }
 
     private func fileSystemEntry(at url: URL) -> FileSystemEntry {
@@ -999,6 +1009,12 @@ private extension SkillAgent {
             "github-copilot"
         case .gemini:
             "gemini-cli"
+        case .other:
+            nil
+        }
+    }
+}
+"
         case .other:
             nil
         }
