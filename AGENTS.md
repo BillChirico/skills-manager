@@ -119,9 +119,13 @@ rollback; MainActor isolation alone is reentrant across an `await`. Release that
 mutation boundary before post-commit filesystem scans, and make each scan
 revalidate the source ID, enabled state, and standardized directory URL after
 discovery returns. When a source mutation rolls back, re-resolve its target by
-`SkillSource.ID` and restore the snapshotted automatic-folder exclusions. Write
-source configuration to an owner-only temporary file and set permissions before
-the atomic rename, so no fallible permission step remains after the commit.
+`SkillSource.ID` and restore only that source's deltas; never replace whole
+skill, state, or selection collections that ungated UI and scan work may have
+changed during the save. Normalize a rolled-back `.scanning` source to
+`.available`; the scan may have already exited after observing the transient
+removal or relocation. Write source configuration to an owner-only temporary
+file and set permissions before the atomic rename, so no fallible permission
+step remains after the commit.
 
 When the account home is available, the abbreviated `~/…` display path keeps the
 account name off screen. Do not pass a raw absolute path to a tooltip, label, or

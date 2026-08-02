@@ -57,8 +57,11 @@ Automatic additions use the existing restore error surface. A configuration
 load or save failure reports `Unable to Restore Directories` and never claims an
 unpersisted automatic source. Source-configuration mutations are serialized
 across the persistence commit or rollback so a failing operation cannot restore
-state over a later successful mutation. The boundary is released before scans,
-which revalidate the source after discovery before publishing results.
+state over a later successful mutation. Rollback applies only the failed
+source's deltas so unrelated scan and UI changes survive. The boundary is
+released before scans, which revalidate the source after discovery before
+publishing results. If rollback follows an invalidated in-flight scan, the
+restored source becomes available instead of remaining permanently scanning.
 
 ## Testing
 
@@ -72,7 +75,8 @@ Swift Testing regressions cover:
 - manual re-add clearing the opt-out;
 - custom removal not creating an opt-out; and
 - rollback of source and exclusion state after a failed save;
-- serialized overlapping mutations; and
+- serialized overlapping mutations and delta rollback that preserves unrelated
+  UI/scan state while normalizing invalidated scans; and
 - failed commits preserving the last good owner-only file without temp leaks.
 
 ## Documentation

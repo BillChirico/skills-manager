@@ -513,41 +513,65 @@ final class SkillLibraryModel {
                 return
             }
 
-            let previousSources = sources
-            let previousSkills = skills
+            let removedSkills = skills.filter { $0.sourceID == sourceID }
+            let removedSkillIDs = Set(removedSkills.map(\.id))
             let previousSelection = selectedSkillIDs
-            let previousSourceStates = sourceStates
+            let previousSourceState = sourceStates[sourceID]
             let previousSidebarSelection = sidebarSelection
-            let previousExcludedAutomaticDirectoryURLs =
-                excludedAutomaticDirectoryURLs
+            let didChangeSidebar = previousSidebarSelection == .source(sourceID)
 
             let removedDirectoryURL = removedSource.directoryURL.standardizedFileURL
+            var insertedAutomaticExclusion: URL?
             if standardSourceDirectoryURLs.contains(removedDirectoryURL) {
-                excludedAutomaticDirectoryURLs.insert(removedDirectoryURL)
+                if excludedAutomaticDirectoryURLs.insert(removedDirectoryURL).inserted {
+                    insertedAutomaticExclusion = removedDirectoryURL
+                }
             }
 
             sources.removeAll { $0.id == sourceID }
             skills.removeAll { $0.sourceID == sourceID }
-            selectedSkillIDs.subtract(
-                previousSkills.lazy.filter { $0.sourceID == sourceID }.map(\.id)
-            )
+            selectedSkillIDs.subtract(removedSkillIDs)
             sourceStates[sourceID] = nil
 
-            if sidebarSelection == .source(sourceID) {
+            if didChangeSidebar {
                 sidebarSelection = .allSkills
             }
+            let sidebarSelectionAfterRemoval = sidebarSelection
+            let selectionAfterRemoval = selectedSkillIDs
+            let selectionRemovedByRemoval = previousSelection.subtracting(
+                selectionAfterRemoval
+            )
 
             do {
                 try await persistSources()
                 sourceAccess?.stopAccessing(sourceID: sourceID)
             } catch {
-                sources = previousSources
-                skills = previousSkills
-                sourceStates = previousSourceStates
-                sidebarSelection = previousSidebarSelection
-                selectedSkillIDs = previousSelection
-                excludedAutomaticDirectoryURLs =
-                    previousExcludedAutomaticDirectoryURLs
+                if sources.contains(where: { $0.id == sourceID }) == false {
+                    sources.append(removedSource)
+                    sources = Self.sortedSources(sources)
+                }
+
+                skills.removeAll { removedSkillIDs.contains($0.id) }
+                skills.append(contentsOf: removedSkills)
+                skills = Self.sortedSkills(skills)
+                sourceStates[sourceID] = Self.rollbackSourceState(
+                    previousSourceState
+                )
+
+                if let insertedAutomaticExclusion {
+                    excludedAutomaticDirectoryURLs.remove(insertedAutomaticExclusion)
+                }
+
+                let selectionIsUnchanged = selectedSkillIDs == selectionAfterRemoval
+                if didChangeSidebar,
+                    sidebarSelection == sidebarSelectionAfterRemoval,
+                    selectionIsUnchanged
+                {
+                    sidebarSelection = previousSidebarSelection
+                }
+                if selectionIsUnchanged {
+                    selectedSkillIDs.formUnion(selectionRemovedByRemoval)
+                }
                 throw error
             }
         }
@@ -948,14 +972,21 @@ final class SkillLibraryModel {
         _ source: SkillSource,
         state previousState: SourceState?
     ) {
-        if previousState == .available {
+        let restoredState = Self.rollbackSourceState(previousState)
+        if restoredState == .available {
             let restoredAccess =
                 sourceAccess?.beginAccessing(source.directoryURL, for: source.id)
             sourceStates[source.id] = restoredAccess == false ? .unavailable : .available
         } else {
             sourceAccess?.stopAccessing(sourceID: source.id)
-            sourceStates[source.id] = previousState
+            sourceStates[source.id] = restoredState
         }
+    }
+
+    private static func rollbackSourceState(
+        _ previousState: SourceState?
+    ) -> SourceState? {
+        previousState == .scanning ? .available : previousState
     }
 
     private func reconcileSelection() {

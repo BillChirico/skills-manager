@@ -255,8 +255,12 @@ or rollback because MainActor methods are reentrant at an `await`. The boundary
 is released before post-commit filesystem scans so Settings actions do not wait
 for discovery. A scan re-resolves its source after discovery and publishes only
 when the ID still exists with the same standardized URL and enabled state.
-Existing legacy bookmark data may still decode, but production composition no
-longer creates or relies on security-scoped bookmarks.
+Failure rollback restores only the affected source, skills, state, and exclusion
+deltas, preserving unrelated scan results and UI selection made during the
+save. A rolled-back `.scanning` state becomes `.available` because the scan was
+invalidated while the source was absent or relocated. Existing legacy bookmark
+data may still decode, but production composition no longer creates or relies
+on security-scoped bookmarks.
 
 The library title reports the selected scope and item count. Toolbar actions keep
 discovery and Settings separate from sort/search controls. Static content uses

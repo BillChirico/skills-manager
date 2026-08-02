@@ -926,6 +926,136 @@ struct SkillLibraryModelTests {
         #expect(savedConfiguration.excludedAutomaticDirectoryURLs.isEmpty)
     }
 
+    @Test("A failed removal preserves unrelated changes made during its save")
+    func failedRemovalRollsBackOnlyRemovedSourceState() async throws {
+        let removedSource = SkillSource(
+            name: "Alpha Skills",
+            directoryURL: URL(filePath: "/skills/alpha")
+        )
+        let otherSource = SkillSource(
+            name: "Beta Skills",
+            directoryURL: URL(filePath: "/skills/beta")
+        )
+        let removedSkill = AgentSkill(
+            name: "Alpha Skill",
+            directoryURL: removedSource.directoryURL.appending(path: "alpha"),
+            sourceID: removedSource.id
+        )
+        let otherSkill = AgentSkill(
+            name: "Beta Skill",
+            directoryURL: otherSource.directoryURL.appending(path: "beta"),
+            sourceID: otherSource.id
+        )
+        let store = SuspendingFailOnceSourceStore(
+            sources: [removedSource, otherSource]
+        )
+        let model = SkillLibraryModel(
+            sources: [removedSource, otherSource],
+            skills: [removedSkill, otherSkill],
+            sourceStore: store,
+            discoverer: FailingDiscoverer()
+        )
+        model.sidebarSelection = .source(removedSource.id)
+        model.selectedSkillIDs = [removedSkill.id]
+
+        let removal = Task { @MainActor in
+            try await model.removeSource(removedSource.id)
+        }
+        await store.waitUntilFirstSaveStarted()
+
+        model.sidebarSelection = .source(otherSource.id)
+        model.selectedSkillIDs = [otherSkill.id]
+        model.setSkillsEnabled(false, skillIDs: [otherSkill.id])
+        await #expect(throws: FailingDiscoverer.ScanError.self) {
+            try await model.rescanSource(otherSource.id)
+        }
+        await store.failFirstSave()
+
+        await #expect(throws: SuspendingFailOnceSourceStore.SaveError.self) {
+            try await removal.value
+        }
+
+        #expect(Set(model.sources.map(\.id)) == [removedSource.id, otherSource.id])
+        #expect(model.skills.first { $0.id == removedSkill.id }?.isEnabled == true)
+        #expect(model.skills.first { $0.id == otherSkill.id }?.isEnabled == false)
+        #expect(model.sourceState(for: otherSource.id) == .unavailable)
+        #expect(model.sidebarSelection == .source(otherSource.id))
+        #expect(model.selectedSkillIDs == [otherSkill.id])
+    }
+
+    @Test("A failed removal does not restore an invalidated scanning state")
+    func failedRemovalNormalizesInvalidatedScanState() async throws {
+        let source = SkillSource(
+            name: "Team Skills",
+            directoryURL: URL(filePath: "/skills/team")
+        )
+        let store = SuspendingFailOnceSourceStore(sources: [source])
+        let discoverer = SuspendingDiscoverer()
+        let model = SkillLibraryModel(
+            sources: [source],
+            sourceStore: store,
+            discoverer: discoverer
+        )
+
+        let scan = Task { @MainActor in
+            try await model.rescanSource(source.id)
+        }
+        await discoverer.waitUntilDiscoveryStarted()
+        let removal = Task { @MainActor in
+            try await model.removeSource(source.id)
+        }
+        await store.waitUntilFirstSaveStarted()
+
+        await discoverer.resumeDiscovery()
+        try await scan.value
+        await store.failFirstSave()
+        await #expect(throws: SuspendingFailOnceSourceStore.SaveError.self) {
+            try await removal.value
+        }
+
+        #expect(model.sources == [source])
+        #expect(model.sourceState(for: source.id) == .available)
+    }
+
+    @Test("A failed relocation does not restore an invalidated scanning state")
+    func failedRelocationNormalizesInvalidatedScanState() async throws {
+        let source = SkillSource(
+            name: "Team Skills",
+            directoryURL: URL(filePath: "/skills/team")
+        )
+        let store = SuspendingFailOnceSourceStore(sources: [source])
+        let discoverer = SuspendingDiscoverer()
+        let model = SkillLibraryModel(
+            sources: [source],
+            sourceStore: store,
+            discoverer: discoverer,
+            bookmarker: StubBookmarker(),
+            sourceAccess: StubSourceAccess()
+        )
+
+        let scan = Task { @MainActor in
+            try await model.rescanSource(source.id)
+        }
+        await discoverer.waitUntilDiscoveryStarted()
+        let relocation = Task { @MainActor in
+            try await model.relocateSource(
+                source.id,
+                to: URL(filePath: "/skills/relocated")
+            )
+        }
+        await store.waitUntilFirstSaveStarted()
+
+        await discoverer.resumeDiscovery()
+        try await scan.value
+        await store.failFirstSave()
+        await #expect(throws: SuspendingFailOnceSourceStore.SaveError.self) {
+            try await relocation.value
+        }
+
+        #expect(model.sources == [source])
+        #expect(model.sourceState(for: source.id) == .available)
+    }
+
     @Test("Updating a skill runs the CLI and rescans configured directories")
     func updateRunsLifecycleAndRescans() async throws {
         let primarySource = SkillSource(
