@@ -220,128 +220,130 @@ final class SkillLibraryModel {
     }
 
     func restoreSources() async {
-        let sourcesToScan = (try? await withSerializedSourceMutation { () -> [SkillSource] in
-            guard hasRestoredSources == false else {
-                return []
-            }
-            hasRestoredSources = true
+        // try? handles CancellationError thrown when task is cancelled before execution
+        let sourcesToScan =
+            (try? await withSerializedSourceMutation { () -> [SkillSource] in
+                guard hasRestoredSources == false else {
+                    return []
+                }
+                hasRestoredSources = true
 
-            guard let sourceStore else {
-                return []
-            }
+                guard let sourceStore else {
+                    return []
+                }
 
-            do {
-                let configuration = try await sourceStore.loadConfiguration()
-                var restoredSources: [SkillSource] = []
-                var restoredSourceStates: [SkillSource.ID: SourceState] = [:]
-                var restoredSourceIDs: Set<SkillSource.ID> = []
-                var configuredDirectoryKeys: Set<URL> = []
-                var didRefreshBookmark = false
+                do {
+                    let configuration = try await sourceStore.loadConfiguration()
+                    var restoredSources: [SkillSource] = []
+                    var restoredSourceStates: [SkillSource.ID: SourceState] = [:]
+                    var restoredSourceIDs: Set<SkillSource.ID> = []
+                    var configuredDirectoryKeys: Set<URL> = []
+                    var didRefreshBookmark = false
 
-                for persistedSource in configuration.sources {
-                    let sourceID = persistedSource.id
-                    guard restoredSourceIDs.insert(sourceID).inserted else {
-                        continue
-                    }
+                    for persistedSource in configuration.sources {
+                        let sourceID = persistedSource.id
+                        guard restoredSourceIDs.insert(sourceID).inserted else {
+                            continue
+                        }
 
-                    var restoredSource = persistedSource
-                    var restoredSourceState = SourceState.available
+                        var restoredSource = persistedSource
+                        var restoredSourceState = SourceState.available
 
-                    if let bookmarkData = restoredSource.bookmarkData,
-                        let bookmarker
-                    {
-                        do {
-                            let resolved = try bookmarker.resolveBookmark(bookmarkData)
-                            restoredSource.directoryURL = resolved.url
+                        if let bookmarkData = restoredSource.bookmarkData,
+                            let bookmarker
+                        {
+                            do {
+                                let resolved = try bookmarker.resolveBookmark(bookmarkData)
+                                restoredSource.directoryURL = resolved.url
 
-                            if sourceAccess?.beginAccessing(resolved.url, for: sourceID) == false {
+                                if sourceAccess?.beginAccessing(resolved.url, for: sourceID) == false {
+                                    restoredSourceState = .unavailable
+                                }
+
+                                if resolved.isStale {
+                                    restoredSource.bookmarkData =
+                                        try bookmarker.makeBookmark(for: resolved.url)
+                                    didRefreshBookmark = true
+                                }
+                            } catch {
                                 restoredSourceState = .unavailable
                             }
+                        }
 
-                            if resolved.isStale {
-                                restoredSource.bookmarkData =
-                                    try bookmarker.makeBookmark(for: resolved.url)
-                                didRefreshBookmark = true
-                            }
+                        let directoryKey = canonicalDirectoryURL(
+                            for: restoredSource.directoryURL
+                        )
+                        guard configuredDirectoryKeys.insert(directoryKey).inserted else {
+                            sourceAccess?.stopAccessing(sourceID: sourceID)
+                            continue
+                        }
+
+                        restoredSources.append(restoredSource)
+                        restoredSourceStates[sourceID] = restoredSourceState
+                    }
+
+                    let didReconcileSources =
+                        restoredSources.count != configuration.sources.count
+                    let normalizedExclusions = Set(
+                        configuration.excludedAutomaticDirectoryURLs.map {
+                            canonicalDirectoryURL(for: $0)
+                        }
+                    )
+                    let reconciledExclusions = normalizedExclusions.subtracting(
+                        configuredDirectoryKeys
+                    )
+                    var mergedDirectoryKeys = configuredDirectoryKeys
+                    let automaticSources = automaticSourceCandidates().filter { candidate in
+                        let directoryKey = canonicalDirectoryURL(
+                            for: candidate.directoryURL
+                        )
+                        guard reconciledExclusions.contains(directoryKey) == false else {
+                            return false
+                        }
+                        return mergedDirectoryKeys.insert(directoryKey).inserted
+                    }
+
+                    restoredSources.append(contentsOf: automaticSources)
+                    for source in automaticSources {
+                        restoredSourceStates[source.id] = .available
+                    }
+
+                    let sortedRestoredSources = Self.sortedSources(restoredSources)
+                    let didReconcileExclusions =
+                        reconciledExclusions
+                        != configuration.excludedAutomaticDirectoryURLs
+
+                    sources = sortedRestoredSources
+                    sourceStates = restoredSourceStates
+                    excludedAutomaticDirectoryURLs = reconciledExclusions
+
+                    let restoredSourcesToScan = sources.filter {
+                        $0.isEnabled && sourceState(for: $0.id) == .available
+                    }
+
+                    if didRefreshBookmark
+                        || automaticSources.isEmpty == false
+                        || didReconcileSources
+                        || didReconcileExclusions
+                    {
+                        do {
+                            try await sourceStore.save(
+                                SkillSourceConfiguration(
+                                    sources: sortedRestoredSources,
+                                    excludedAutomaticDirectoryURLs: reconciledExclusions
+                                )
+                            )
                         } catch {
-                            restoredSourceState = .unavailable
+                            report(error, title: "Unable to Save Directories")
                         }
                     }
 
-                    let directoryKey = canonicalDirectoryURL(
-                        for: restoredSource.directoryURL
-                    )
-                    guard configuredDirectoryKeys.insert(directoryKey).inserted else {
-                        sourceAccess?.stopAccessing(sourceID: sourceID)
-                        continue
-                    }
-
-                    restoredSources.append(restoredSource)
-                    restoredSourceStates[sourceID] = restoredSourceState
+                    return restoredSourcesToScan
+                } catch {
+                    report(error, title: "Unable to Restore Directories")
+                    return []
                 }
-
-                let didReconcileSources =
-                    restoredSources.count != configuration.sources.count
-                let normalizedExclusions = Set(
-                    configuration.excludedAutomaticDirectoryURLs.map {
-                        canonicalDirectoryURL(for: $0)
-                    }
-                )
-                let reconciledExclusions = normalizedExclusions.subtracting(
-                    configuredDirectoryKeys
-                )
-                var mergedDirectoryKeys = configuredDirectoryKeys
-                let automaticSources = automaticSourceCandidates().filter { candidate in
-                    let directoryKey = canonicalDirectoryURL(
-                        for: candidate.directoryURL
-                    )
-                    guard reconciledExclusions.contains(directoryKey) == false else {
-                        return false
-                    }
-                    return mergedDirectoryKeys.insert(directoryKey).inserted
-                }
-
-                restoredSources.append(contentsOf: automaticSources)
-                for source in automaticSources {
-                    restoredSourceStates[source.id] = .available
-                }
-
-                let sortedRestoredSources = Self.sortedSources(restoredSources)
-                let didReconcileExclusions =
-                    reconciledExclusions
-                    != configuration.excludedAutomaticDirectoryURLs
-
-                sources = sortedRestoredSources
-                sourceStates = restoredSourceStates
-                excludedAutomaticDirectoryURLs = reconciledExclusions
-
-                let restoredSourcesToScan = sources.filter {
-                    $0.isEnabled && sourceState(for: $0.id) == .available
-                }
-
-                if didRefreshBookmark
-                    || automaticSources.isEmpty == false
-                    || didReconcileSources
-                    || didReconcileExclusions
-                {
-                    do {
-                        try await sourceStore.save(
-                            SkillSourceConfiguration(
-                                sources: sortedRestoredSources,
-                                excludedAutomaticDirectoryURLs: reconciledExclusions
-                            )
-                        )
-                    } catch {
-                        report(error, title: "Unable to Save Directories")
-                    }
-                }
-
-                return restoredSourcesToScan
-            } catch {
-                report(error, title: "Unable to Restore Directories")
-                return []
-            }
-        }) ?? []
+            }) ?? []
 
         for source in sourcesToScan {
             do {
