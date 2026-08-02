@@ -16,7 +16,8 @@ struct SkillList: View {
                         skill: skill,
                         isSelected: model.selectedSkillIDs.contains(skill.id),
                         agentName: model.agentName(for: skill),
-                        sourceName: model.sourceName(for: skill)
+                        sourceName: model.sourceName(for: skill),
+                        isMutating: model.isMutating(skill.id)
                     )
                     .tag(skill.id)
                     .contextMenu {
@@ -45,15 +46,18 @@ struct SkillList: View {
             ),
             titleVisibility: .visible
         ) {
-            Button("Remove from Library", role: .destructive) {
-                model.removeSkills(skillIDsPendingRemoval)
+            Button("Remove from Disk", role: .destructive) {
+                let skillIDs = skillIDsPendingRemoval
                 skillIDsPendingRemoval.removeAll()
+                Task { @MainActor in
+                    await model.removeSkills(skillIDs)
+                }
             }
             Button("Cancel", role: .cancel) {
                 skillIDsPendingRemoval.removeAll()
             }
         } message: {
-            Text("The skill folders remain on disk.")
+            Text("This permanently removes the selected skill folders from disk.")
         }
     }
 
@@ -96,10 +100,16 @@ struct SkillList: View {
                 .monospacedDigit()
 
             Button(bulkUpdateTitle, systemImage: "arrow.down.circle") {
-                model.updateSkills(model.selectedSkillIDs)
+                let skillIDs = model.selectedSkillIDs
+                Task { @MainActor in
+                    await model.updateSkills(skillIDs)
+                }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(selectedSkillsWithUpdates.isEmpty)
+            .disabled(
+                selectedSkillsWithUpdates.isEmpty
+                    || model.selectedSkills.contains { model.isMutating($0.id) }
+            )
 
             Button("Cancel") {
                 model.selectedSkillIDs.removeAll()
@@ -117,8 +127,11 @@ struct SkillList: View {
     private func skillContextMenu(_ skill: AgentSkill) -> some View {
         if skill.hasUpdate {
             Button("Update", systemImage: "arrow.down.circle") {
-                model.updateSkills([skill.id])
+                Task { @MainActor in
+                    await model.updateSkills([skill.id])
+                }
             }
+            .disabled(model.isMutating(skill.id))
         }
 
         Button(
@@ -127,6 +140,7 @@ struct SkillList: View {
         ) {
             model.setSkillsEnabled(!skill.isEnabled, skillIDs: [skill.id])
         }
+        .disabled(model.isMutating(skill.id))
 
         Button("Reveal in Finder", systemImage: "finder") {
             NSWorkspace.shared.activateFileViewerSelecting([skill.directoryURL])
@@ -151,6 +165,7 @@ struct SkillList: View {
         Button("Remove…", systemImage: "minus.circle", role: .destructive) {
             skillIDsPendingRemoval = [skill.id]
         }
+        .disabled(model.isMutating(skill.id))
     }
 
     private var selectedSkillsWithUpdates: Set<AgentSkill.ID> {
@@ -239,6 +254,7 @@ private struct SkillRow: View {
     let isSelected: Bool
     let agentName: String
     let sourceName: String
+    let isMutating: Bool
 
     var body: some View {
         HStack(spacing: SkillsManagerSpacing.medium) {
@@ -282,6 +298,12 @@ private struct SkillRow: View {
             Spacer(minLength: SkillsManagerSpacing.small)
 
             HStack(spacing: SkillsManagerSpacing.small) {
+                if isMutating {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("Skill operation in progress")
+                }
+
                 if skill.hasUpdate {
                     Image(systemName: "arrow.down.circle")
                         .foregroundStyle(isSelected ? Color.white : Color.accentColor)
@@ -310,6 +332,7 @@ private struct SkillRow: View {
             sourceName,
             skill.hasUpdate ? "Update available" : nil,
             skill.isEnabled ? nil : "Disabled",
+            isMutating ? "Operation in progress" : nil,
         ]
         .compactMap { $0 }
         .joined(separator: ", ")

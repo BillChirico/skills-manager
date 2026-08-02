@@ -262,10 +262,9 @@ struct SkillCatalogView: View {
 
                 Label(
                     """
-                    Skills Manager downloads these files over HTTPS and copies them into the \
-                    directories you select; it does not execute downloaded content during \
-                    installation. A skill is instructions for your agent, so review SKILL.md \
-                    before allowing an agent to use it.
+                    Skills Manager invokes the official npx skills CLI with a validated argument \
+                    vector and no shell. The CLI downloads and writes the skill into each selected \
+                    agent directory. Review SKILL.md before allowing an agent to use it.
                     """,
                     systemImage: "text.magnifyingglass"
                 )
@@ -281,7 +280,9 @@ struct SkillCatalogView: View {
             ContentUnavailableView {
                 Label("Add an Agent Directory First", systemImage: "folder.badge.plus")
             } description: {
-                Text("Add a Codex, Claude Code, or other agent directory before installing.")
+                Text(
+                    "Add a supported default agent directory before installing. Custom directories remain readable, but the skills CLI cannot mutate them."
+                )
             } actions: {
                 SettingsLink {
                     Label("Manage Agent Directories", systemImage: "gearshape")
@@ -404,7 +405,9 @@ struct SkillCatalogView: View {
 
     private var installableSources: [SkillSource] {
         libraryModel.sources.filter {
-            $0.isEnabled && libraryModel.sourceState(for: $0.id) == .available
+            $0.isEnabled
+                && $0.agent != .other
+                && libraryModel.sourceState(for: $0.id) == .available
         }
     }
 

@@ -33,15 +33,18 @@ struct SkillDetail: View {
             ),
             titleVisibility: .visible
         ) {
-            Button("Remove from Library", role: .destructive) {
-                model.removeSkills(skillIDsPendingRemoval)
+            Button("Remove from Disk", role: .destructive) {
+                let skillIDs = skillIDsPendingRemoval
                 skillIDsPendingRemoval.removeAll()
+                Task { @MainActor in
+                    await model.removeSkills(skillIDs)
+                }
             }
             Button("Cancel", role: .cancel) {
                 skillIDsPendingRemoval.removeAll()
             }
         } message: {
-            Text("The skill folders remain on disk.")
+            Text("This permanently removes the selected skill folders from disk.")
         }
         .onChange(of: model.selectedSkill?.id) {
             selectedTab = .overview
@@ -90,6 +93,10 @@ struct SkillDetail: View {
 
     private func statusChips(for skill: AgentSkill) -> some View {
         FlowLayout(spacing: SkillsManagerSpacing.small) {
+            if model.isMutating(skill.id) {
+                StatusChip(title: "WORKING", systemImage: "arrow.triangle.2.circlepath")
+            }
+
             if skill.hasUpdate {
                 StatusChip(
                     title: "UPDATE AVAILABLE",
@@ -126,20 +133,25 @@ struct SkillDetail: View {
                     "Update to \(skill.availableVersion ?? "Latest")",
                     systemImage: "arrow.down.circle"
                 ) {
-                    model.updateSkills([skill.id])
+                    Task { @MainActor in
+                        await model.updateSkills([skill.id])
+                    }
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(model.isMutating(skill.id))
             }
 
             Button(skill.isEnabled ? "Disable" : "Enable") {
                 model.setSkillsEnabled(!skill.isEnabled, skillIDs: [skill.id])
             }
             .buttonStyle(.bordered)
+            .disabled(model.isMutating(skill.id))
 
             Button("Remove…") {
                 skillIDsPendingRemoval = [skill.id]
             }
             .buttonStyle(.bordered)
+            .disabled(model.isMutating(skill.id))
         }
     }
 
@@ -300,10 +312,16 @@ struct SkillDetail: View {
 
             HStack(spacing: SkillsManagerSpacing.small) {
                 Button(bulkUpdateTitle, systemImage: "arrow.down.circle") {
-                    model.updateSkills(model.selectedSkillIDs)
+                    let skillIDs = model.selectedSkillIDs
+                    Task { @MainActor in
+                        await model.updateSkills(skillIDs)
+                    }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(model.selectedSkills.contains(where: \.hasUpdate) == false)
+                .disabled(
+                    model.selectedSkills.contains(where: \.hasUpdate) == false
+                        || selectedSkillsAreMutating
+                )
 
                 Button(bulkEnablementTitle) {
                     model.setSkillsEnabled(
@@ -312,11 +330,13 @@ struct SkillDetail: View {
                     )
                 }
                 .buttonStyle(.bordered)
+                .disabled(selectedSkillsAreMutating)
 
                 Button("Remove…") {
                     skillIDsPendingRemoval = model.selectedSkillIDs
                 }
                 .buttonStyle(.bordered)
+                .disabled(selectedSkillsAreMutating)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -340,6 +360,10 @@ struct SkillDetail: View {
 
     private var bulkEnablementTitle: String {
         model.selectedSkills.allSatisfy { $0.isEnabled == false } ? "Enable" : "Disable"
+    }
+
+    private var selectedSkillsAreMutating: Bool {
+        model.selectedSkills.contains { model.isMutating($0.id) }
     }
 }
 

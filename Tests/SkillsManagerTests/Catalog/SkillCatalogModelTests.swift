@@ -15,8 +15,7 @@ struct SkillCatalogModelTests {
                     makeSkill(slug: "most-downloaded", installs: 9_000),
                 ]
             ),
-            packageFetcher: FixturePackageFetcher(),
-            packageInstaller: FixturePackageInstaller()
+            skillManager: FixtureSkillManager()
         )
 
         await model.loadTopDownloads()
@@ -32,8 +31,7 @@ struct SkillCatalogModelTests {
         let catalog = FixtureCatalog(topDownloads: [makeSkill(slug: "cached", installs: 1)])
         let model = SkillCatalogModel(
             catalog: catalog,
-            packageFetcher: FixturePackageFetcher(),
-            packageInstaller: FixturePackageInstaller()
+            skillManager: FixtureSkillManager()
         )
 
         await model.loadTopDownloads()
@@ -47,8 +45,7 @@ struct SkillCatalogModelTests {
         let catalog = FailingCatalog()
         let model = SkillCatalogModel(
             catalog: catalog,
-            packageFetcher: FixturePackageFetcher(),
-            packageInstaller: FixturePackageInstaller()
+            skillManager: FixtureSkillManager()
         )
 
         await model.loadTopDownloads()
@@ -72,8 +69,7 @@ struct SkillCatalogModelTests {
         )
         let model = SkillCatalogModel(
             catalog: catalog,
-            packageFetcher: FixturePackageFetcher(),
-            packageInstaller: FixturePackageInstaller()
+            skillManager: FixtureSkillManager()
         )
 
         let firstLoad = Task { await model.loadTopDownloads() }
@@ -103,8 +99,7 @@ struct SkillCatalogModelTests {
                     makeSkill(slug: "middle", installs: 400),
                 ]
             ),
-            packageFetcher: FixturePackageFetcher(),
-            packageInstaller: FixturePackageInstaller()
+            skillManager: FixtureSkillManager()
         )
         model.query = "swift"
 
@@ -123,8 +118,7 @@ struct SkillCatalogModelTests {
                 searchResults: [makeSkill(slug: "match", installs: 5)],
                 topDownloads: [makeSkill(slug: "leader", installs: 9_000)]
             ),
-            packageFetcher: FixturePackageFetcher(),
-            packageInstaller: FixturePackageInstaller()
+            skillManager: FixtureSkillManager()
         )
 
         await model.loadTopDownloads()
@@ -142,8 +136,7 @@ struct SkillCatalogModelTests {
     func reportsSearchErrors() async {
         let model = SkillCatalogModel(
             catalog: FailingCatalog(),
-            packageFetcher: FixturePackageFetcher(),
-            packageInstaller: FixturePackageInstaller()
+            skillManager: FixtureSkillManager()
         )
         model.query = "swift"
 
@@ -159,8 +152,7 @@ struct SkillCatalogModelTests {
         let catalog = ControlledSearchCatalog()
         let model = SkillCatalogModel(
             catalog: catalog,
-            packageFetcher: FixturePackageFetcher(),
-            packageInstaller: FixturePackageInstaller()
+            skillManager: FixtureSkillManager()
         )
 
         model.query = "first"
@@ -190,14 +182,12 @@ struct SkillCatalogModelTests {
         #expect(model.isSearching == false)
     }
 
-    @Test("Installing into several directories downloads the package once")
+    @Test("Installing into several directories invokes the lifecycle manager for each")
     func installsIntoEverySelectedDirectory() async {
-        let fetcher = FixturePackageFetcher()
-        let installer = FixturePackageInstaller()
+        let skillManager = FixtureSkillManager()
         let model = SkillCatalogModel(
             catalog: FixtureCatalog(),
-            packageFetcher: fetcher,
-            packageInstaller: installer
+            skillManager: skillManager
         )
         let codex = makeSource(name: "Codex", path: "/skills/codex")
         let claude = makeSource(name: "Claude", path: "/skills/claude")
@@ -213,7 +203,7 @@ struct SkillCatalogModelTests {
                 "/skills/claude/swift-testing-pro",
             ]
         )
-        #expect(await fetcher.fetchCount == 1)
+        #expect(await skillManager.installedSourceIDs == [codex.id, claude.id])
         #expect(model.installingSkillID == nil)
     }
 
@@ -223,8 +213,7 @@ struct SkillCatalogModelTests {
         let claude = makeSource(name: "Claude", path: "/skills/claude")
         let model = SkillCatalogModel(
             catalog: FixtureCatalog(),
-            packageFetcher: FixturePackageFetcher(),
-            packageInstaller: FixturePackageInstaller(failingRootPaths: ["/skills/codex"])
+            skillManager: FixtureSkillManager(failingRootPaths: ["/skills/codex"])
         )
 
         let outcomes = await model.install(makeSkill(), into: [codex, claude])
@@ -236,12 +225,13 @@ struct SkillCatalogModelTests {
         #expect(outcomes[1].didSucceed)
     }
 
-    @Test("A failed download reports the same error for every selected directory")
-    func reportsFetchFailurePerDestination() async {
+    @Test("A CLI failure in every directory reports an outcome for each")
+    func reportsLifecycleFailurePerDestination() async {
         let model = SkillCatalogModel(
             catalog: FixtureCatalog(),
-            packageFetcher: FailingPackageFetcher(),
-            packageInstaller: FixturePackageInstaller()
+            skillManager: FixtureSkillManager(
+                failingRootPaths: ["/skills/codex", "/skills/claude"]
+            )
         )
         let destinations = [
             makeSource(name: "Codex", path: "/skills/codex"),
@@ -252,32 +242,30 @@ struct SkillCatalogModelTests {
 
         #expect(outcomes.count == 2)
         #expect(outcomes.filter(\.didSucceed).isEmpty)
-        #expect(outcomes.compactMap(\.errorMessage) == ["Repository unavailable", "Repository unavailable"])
+        #expect(outcomes.compactMap(\.errorMessage) == ["CLI unavailable", "CLI unavailable"])
         #expect(model.installingSkillID == nil)
     }
 
     @Test("Installing with no selected directory does no work")
     func ignoresEmptyDestinations() async {
-        let fetcher = FixturePackageFetcher()
+        let skillManager = FixtureSkillManager()
         let model = SkillCatalogModel(
             catalog: FixtureCatalog(),
-            packageFetcher: fetcher,
-            packageInstaller: FixturePackageInstaller()
+            skillManager: skillManager
         )
 
         let outcomes = await model.install(makeSkill(), into: [])
 
         #expect(outcomes.isEmpty)
-        #expect(await fetcher.fetchCount == 0)
+        #expect(await skillManager.installedSourceIDs.isEmpty)
     }
 
-    @Test("The install boundary rejects an unsafe catalog entry before downloading")
+    @Test("The install boundary rejects an unsafe catalog entry before launching the CLI")
     func rejectsUnsafeCatalogEntry() async {
-        let fetcher = FixturePackageFetcher()
+        let skillManager = FixtureSkillManager()
         let model = SkillCatalogModel(
             catalog: FixtureCatalog(),
-            packageFetcher: fetcher,
-            packageInstaller: FixturePackageInstaller()
+            skillManager: skillManager
         )
         let destination = makeSource(name: "Codex", path: "/skills/codex")
 
@@ -292,17 +280,16 @@ struct SkillCatalogModelTests {
             outcomes[0].errorMessage
                 == "This skill's catalog data cannot be installed safely."
         )
-        #expect(await fetcher.fetchCount == 0)
+        #expect(await skillManager.installedSourceIDs.isEmpty)
         #expect(model.installingSkillID == nil)
     }
 
     @Test("A second install is rejected while the first install owns the busy state")
     func rejectsOverlappingInstalls() async {
-        let fetcher = SuspendingPackageFetcher()
+        let skillManager = SuspendingSkillManager()
         let model = SkillCatalogModel(
             catalog: FixtureCatalog(),
-            packageFetcher: fetcher,
-            packageInstaller: FixturePackageInstaller()
+            skillManager: skillManager
         )
         let skill = makeSkill()
         let destination = makeSource(name: "Codex", path: "/skills/codex")
@@ -310,11 +297,11 @@ struct SkillCatalogModelTests {
         let firstInstall = Task {
             await model.install(skill, into: [destination])
         }
-        await fetcher.waitUntilStarted()
+        await skillManager.waitUntilStarted()
 
         let secondOutcomes = await model.install(skill, into: [destination])
 
-        #expect(await fetcher.fetchCount == 1)
+        #expect(await skillManager.installCount == 1)
         #expect(model.installingSkillID == skill.id)
         #expect(secondOutcomes.count == 1)
         #expect(secondOutcomes[0].didSucceed == false)
@@ -323,7 +310,7 @@ struct SkillCatalogModelTests {
                 == "Another skill installation is already in progress."
         )
 
-        await fetcher.resume()
+        await skillManager.resume()
         let firstOutcomes = await firstInstall.value
 
         #expect(firstOutcomes.count == 1)
@@ -448,29 +435,44 @@ private actor SuspendingTopDownloadsCatalog: SkillCatalogSearching {
     }
 }
 
-private actor FixturePackageFetcher: SkillPackageFetching {
-    private(set) var fetchCount = 0
-
-    func fetchPackage(for skill: CatalogSkill) async throws -> SkillPackage {
-        fetchCount += 1
-        return SkillPackage(
-            skillID: skill.id,
-            files: [
-                SkillPackageFile(
-                    path: "SKILL.md",
-                    contents: Data("---\nname: fixture\n---\n".utf8)
-                )
-            ]
-        )
+private actor FixtureSkillManager: SkillManaging {
+    struct ManagerError: LocalizedError {
+        var errorDescription: String? { "CLI unavailable" }
     }
+
+    private let failingRootPaths: Set<String>
+    private(set) var installedSourceIDs: [SkillSource.ID] = []
+
+    init(failingRootPaths: Set<String> = []) {
+        self.failingRootPaths = failingRootPaths
+    }
+
+    func install(_ skill: CatalogSkill, into source: SkillSource) async throws -> URL {
+        installedSourceIDs.append(source.id)
+        guard failingRootPaths.contains(source.directoryURL.path(percentEncoded: false)) == false
+        else {
+            throw ManagerError()
+        }
+
+        return source.directoryURL.appending(path: skill.slug, directoryHint: .isDirectory)
+    }
+
+    func update(_ skill: AgentSkill, in source: SkillSource) async throws {}
+
+    func remove(_ skill: AgentSkill, from source: SkillSource) async throws {}
 }
 
-private actor SuspendingPackageFetcher: SkillPackageFetching {
-    private var continuation: CheckedContinuation<SkillPackage, Never>?
-    private(set) var fetchCount = 0
+private actor SuspendingSkillManager: SkillManaging {
+    private var continuation: CheckedContinuation<URL, Never>?
+    private var installedURL: URL?
+    private(set) var installCount = 0
 
-    func fetchPackage(for skill: CatalogSkill) async throws -> SkillPackage {
-        fetchCount += 1
+    func install(_ skill: CatalogSkill, into source: SkillSource) async throws -> URL {
+        installCount += 1
+        installedURL = source.directoryURL.appending(
+            path: skill.slug,
+            directoryHint: .isDirectory
+        )
         return await withCheckedContinuation { continuation in
             self.continuation = continuation
         }
@@ -483,55 +485,16 @@ private actor SuspendingPackageFetcher: SkillPackageFetching {
     }
 
     func resume() {
-        continuation?.resume(
-            returning: SkillPackage(
-                skillID: "fixture",
-                files: [
-                    SkillPackageFile(
-                        path: "SKILL.md",
-                        contents: Data("---\nname: fixture\n---\n".utf8)
-                    )
-                ]
-            )
-        )
+        guard let installedURL else {
+            return
+        }
+
+        continuation?.resume(returning: installedURL)
         continuation = nil
-    }
-}
-
-private struct FailingPackageFetcher: SkillPackageFetching {
-    struct FetchError: LocalizedError {
-        var errorDescription: String? {
-            "Repository unavailable"
-        }
+        self.installedURL = nil
     }
 
-    func fetchPackage(for skill: CatalogSkill) async throws -> SkillPackage {
-        throw FetchError()
-    }
-}
+    func update(_ skill: AgentSkill, in source: SkillSource) async throws {}
 
-private struct FixturePackageInstaller: SkillPackageInstalling {
-    struct InstallError: LocalizedError {
-        var errorDescription: String? {
-            "The directory is not writable."
-        }
-    }
-
-    let failingRootPaths: Set<String>
-
-    init(failingRootPaths: Set<String> = []) {
-        self.failingRootPaths = failingRootPaths
-    }
-
-    func install(
-        _ package: SkillPackage,
-        directoryName: String,
-        into rootDirectory: URL
-    ) throws -> URL {
-        guard failingRootPaths.contains(rootDirectory.path(percentEncoded: false)) == false else {
-            throw InstallError()
-        }
-
-        return rootDirectory.appending(path: directoryName, directoryHint: .isDirectory)
-    }
+    func remove(_ skill: AgentSkill, from source: SkillSource) async throws {}
 }

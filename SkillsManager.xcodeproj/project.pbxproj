@@ -56,17 +56,19 @@
 		4A52F3B3441ED487F6728B46 /* SkillCatalogModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillCatalogModel.swift; sourceTree = "<group>"; };
 		560792EB417C14855F48371C /* 2026-07-27-folder-settings.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "2026-07-27-folder-settings.md"; sourceTree = "<group>"; };
 		567279ACF7EB9807D8FBBD49 /* AgentDirectorySuggestion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDirectorySuggestion.swift; sourceTree = "<group>"; };
+		5684009393E19775EF010F06 /* 2026-08-01-skills-cli-lifecycle.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "2026-08-01-skills-cli-lifecycle.md"; sourceTree = "<group>"; };
 		6A4E285DCEC62A32FE2BCFD8 /* SkillSourceSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillSourceSidebar.swift; sourceTree = "<group>"; };
+		6A8C0771628A76401D627527 /* 2026-08-01-skills-cli-lifecycle-design.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "2026-08-01-skills-cli-lifecycle-design.md"; sourceTree = "<group>"; };
 		71E86521947227FAD14E43AA /* SkillsManager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SkillsManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		722F8D554E99C8E055634971 /* SkillSourceAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillSourceAccess.swift; sourceTree = "<group>"; };
 		798333DD8A836A78860F88DF /* SkillDetail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillDetail.swift; sourceTree = "<group>"; };
+		7F3256AD67D63F0F51359FC2 /* SECURITY.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = SECURITY.md; sourceTree = "<group>"; };
 		8091891E4D7B5CB7043BACC1 /* SkillAgent+Presentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillAgent+Presentation.swift"; sourceTree = "<group>"; };
 		8A6FD9583210F461B8C10058 /* SkillLibraryModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryModelTests.swift; sourceTree = "<group>"; };
 		9012D9D210AEF08DCBE01777 /* ARCHITECTURE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ARCHITECTURE.md; sourceTree = "<group>"; };
 		93A141CC23CA196562F6ACF7 /* ToolbarSearchFieldWidth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolbarSearchFieldWidth.swift; sourceTree = "<group>"; };
 		9435086B058725D24C7EE076 /* UserHomeDirectoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserHomeDirectoryTests.swift; sourceTree = "<group>"; };
 		967846C50FEAD77DB44AC053 /* SkillList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillList.swift; sourceTree = "<group>"; };
-		9D8C677DEC993CE4CF7548D8 /* SkillsManager.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SkillsManager.entitlements; sourceTree = "<group>"; };
 		A08B991B2714753A37B17F5B /* SkillLibraryOrganizationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryOrganizationTests.swift; sourceTree = "<group>"; };
 		A4BFFAD3E6AB156341E9F95B /* SkillsManagerAppTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillsManagerAppTests.swift; sourceTree = "<group>"; };
 		AF38AD0F106FB2D04588BFCD /* 2026-07-27-folder-settings-review-followup-design.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "2026-07-27-folder-settings-review-followup-design.md"; sourceTree = "<group>"; };
@@ -158,14 +160,6 @@
 			path = App;
 			sourceTree = "<group>";
 		};
-		4934C2365AFB2ED46B1B1198 /* Support */ = {
-			isa = PBXGroup;
-			children = (
-				9D8C677DEC993CE4CF7548D8 /* SkillsManager.entitlements */,
-			);
-			path = Support;
-			sourceTree = "<group>";
-		};
 		4E25364D4B0A480D9DEA6CAB /* Catalog */ = {
 			isa = PBXGroup;
 			children = (
@@ -186,6 +180,7 @@
 			isa = PBXGroup;
 			children = (
 				9012D9D210AEF08DCBE01777 /* ARCHITECTURE.md */,
+				7F3256AD67D63F0F51359FC2 /* SECURITY.md */,
 				BB9D3C67CAFC2D97C1F841FD /* superpowers */,
 			);
 			path = docs;
@@ -204,6 +199,7 @@
 			children = (
 				E6DD7D944224CEC48C29FE22 /* 2026-07-27-folder-settings-design.md */,
 				AF38AD0F106FB2D04588BFCD /* 2026-07-27-folder-settings-review-followup-design.md */,
+				6A8C0771628A76401D627527 /* 2026-08-01-skills-cli-lifecycle-design.md */,
 			);
 			path = specs;
 			sourceTree = "<group>";
@@ -225,7 +221,6 @@
 				94DF0A2408CB4C02531EE436 /* Features */,
 				7124B9408E0A79723DEAD68C /* Resources */,
 				E1379E1E9C652484CDE293AF /* Shared */,
-				4934C2365AFB2ED46B1B1198 /* Support */,
 			);
 			path = SkillsManager;
 			sourceTree = "<group>";
@@ -255,6 +250,7 @@
 			children = (
 				D3629868252908B899455D16 /* 2026-07-27-folder-settings-review-followup.md */,
 				560792EB417C14855F48371C /* 2026-07-27-folder-settings.md */,
+				5684009393E19775EF010F06 /* 2026-08-01-skills-cli-lifecycle.md */,
 			);
 			path = plans;
 			sourceTree = "<group>";
@@ -451,11 +447,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = SkillsManager/Support/SkillsManager.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Skills Manager";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
@@ -633,11 +629,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = SkillsManager/Support/SkillsManager.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Skills Manager";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";

@@ -7,7 +7,7 @@ The current product surface includes:
 
 - a SwiftUI three-column library with smart groups, scoped search, multi-select,
   detail tabs, and recovery-focused empty states;
-- persistent user-selected directories backed by security-scoped bookmarks;
+- persistent user-selected skill directories;
 - one-click suggested locations for the shared `~/.agents/skills` folder, Claude
   Code, Codex, Cursor, Gemini, and GitHub Copilot, listed only while the folder
   exists, plus a picker for any other directory;
@@ -18,11 +18,12 @@ The current product surface includes:
   skills, ranks search results by download count, shows the download count on
   every row and in the detail view, links out to the skill's skills.sh page, and
   displays the page's install command with a copy action;
-- installation into one or many configured directories from a single download;
+- installation into one or many supported agent directories through the official
+  `skills` CLI;
 - name, date-added, and agent sorting, with the agent and source shown on every
   skill row;
-- right-click actions for updating, enabling, revealing, opening, copying the
-  path of, and removing a skill;
+- CLI-backed on-disk removal and a fail-closed update action, plus controls for
+  enabling, revealing, opening, and copying the path of a skill;
 - directory rename, agent assignment, enable, rescan, reveal, and remove
   controls;
 - a resizable Settings folder list with native plus/minus management controls,
@@ -32,7 +33,7 @@ The current product surface includes:
   standard Settings app-menu command;
 - independent enabled and update-availability state for each skill;
 - a reusable `SkillsCore` Swift package for discovery, persistence, models,
-  filtering, search, catalog access, and safe package installation;
+  filtering, search, catalog access, and shell-free CLI lifecycle operations;
 - Swift Testing coverage for the core package and app state;
 - an XcodeGen project specification and generated Xcode project; and
 - contributor and AI-agent guidance.
@@ -45,6 +46,7 @@ newer, with a material-based fallback on earlier supported versions.
 - macOS 15 or newer
 - Xcode 26 or newer
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) 2.46 or newer
+- Node.js 22.20 or newer with `npx` available through a standard installation path
 
 Install XcodeGen with Homebrew:
 
@@ -85,46 +87,70 @@ two or more characters switches to search, and both modes are ordered by
 download count. Each row and the detail view show that count, and the detail
 view links to the skill's page on skills.sh.
 
-GitHub-backed results can be installed into one or many enabled, available agent
-directories. Selecting several directories downloads the package once and copies
-it into each of them; one directory's failure does not stop the others, and the
-per-directory outcome is reported. Installation downloads only the selected skill
-directory, validates every relative path, caps the package at 200 files and
-10 MiB, stages the files before moving them into place, and never replaces an
-existing directory. Remote responses are limited while they stream instead of
-only after they have been buffered: skills.sh catalog responses are capped at
-8 MiB, the GitHub recursive tree is also capped at 8 MiB, and every raw-file
-request is capped at the package budget that remains.
+GitHub-backed results can be installed into one or many enabled, available
+default agent directories. Skills Manager invokes the official `skills` CLI once
+per selected directory and reports one outcome per directory, so one failure does
+not stop the remaining installs. Successful installs are rescanned from disk and
+selected in the library.
 
-Each GitHub installation resolves the repository's current `HEAD` to one commit
-SHA, then uses that SHA for both the recursive tree and every raw-file download.
-The requested slug must match the directory containing `SKILL.md`. A
-repository-root manifest is accepted only when it is the repository's sole
-`SKILL.md` and the repository name exactly matches the requested slug; all other
-missing or mismatched manifests fail closed.
+Update and remove actions use the same lifecycle boundary. The pinned upstream
+CLI can filter an update by skill and global/project scope, but release 1.5.21
+has no `--agent` option for update. Skills Manager therefore refuses update
+before process launch rather than risk changing the same skill in other agent
+directories. Reinstall from a reviewed source is the current safe refresh path.
+Remove deletes successful skill directories from the library and disk, rescans
+affected sources, and leaves failed selections visible. Busy state prevents the
+same skill from receiving overlapping mutations.
 
 ### The install command
 
-The detail view shows the same `npx skills add …` command that skills.sh prints
-at the top of a skill page, with a copy action for running it yourself.
+The detail view shows the `npx skills add …` command that skills.sh prints at the
+top of a skill page, with a copy action. App actions execute the official CLI
+directly as an executable plus argument vector; no shell parses the command and
+no remote string becomes executable syntax. For app-initiated mutations, `npx`
+selects the audited `skills@1.5.21` package. The app adds non-interactive global,
+agent, and copy flags for installs, plus the agent-scoped remove form for
+existing skills.
 
-Skills Manager **displays** that command; it never executes it. Installing from
-the app performs the command's work natively: it downloads the same files over
-HTTPS and copies them into the directories you selected. Skills are copied as
-data and are not executed during installation. Installed skills are instructions
-that an agent may later follow with that agent's own permissions, so review
-`SKILL.md` before allowing an agent to use one. Two reasons installation is not a
-shell invocation:
+Catalog owners, repository names, slugs, local directory names, and leading
+options are validated before they can become process arguments. Dot-prefixed
+installation slugs are rejected so a catalog entry cannot create a hidden
+directory that discovery would skip. Lifecycle operations are limited to each
+supported agent's standard directory. Custom directories remain discoverable
+and readable but are not install, update, or remove targets.
 
-- `npx` fetches and runs arbitrary remote code, which would turn a catalog entry
-  into local code execution.
-- The app is sandboxed and writes only through user-selected directory grants,
-  which a spawned CLI would neither inherit nor respect.
+The child process receives a minimal environment containing the account home,
+the validated absolute `npx`/Node directory plus fixed system executable
+directories, locale and temporary-directory settings, telemetry opt-outs, and
+non-interactive npm settings. Empty, relative, and delimiter-unsafe executable
+search locations are rejected. The app uses the public npm registry, disables
+lifecycle scripts, and runs from a new owner-only empty working directory.
+Unrelated parent variables, arbitrary inherited `PATH` entries, npm
+configuration, and secrets are not forwarded. Standard input and output are
+disconnected. A five-minute deadline and task cancellation stop the directly
+launched `npx` process, with a forced stop after a grace period. Descendant work
+started by that process is not supervised and may continue.
 
-The command is rebuilt locally from validated catalog fields rather than scraped
-from the remote page, so the text on screen cannot contain shell metacharacters.
-Dot-prefixed installation slugs are rejected so a catalog entry cannot create a
-hidden directory that Skills Manager's scanner would skip.
+Lifecycle paths may not contain symbolic links. Install requires its exact
+destination to be absent before launch, then requires a real destination
+directory and a regular, non-symbolic `SKILL.md`. The app snapshots source entry
+names before installation. On a nonzero exit, timeout, cancellation, or missing
+expected destination, the error lists at most ten sorted, escaped entry names
+observed so far, reports how many additional names were omitted, and leaves the
+entries on disk for review. This observation is not a final rollback report:
+unsupervised descendants or concurrent writers may add entries later, and the
+snapshot cannot identify changes inside directories that already existed.
+Remove requires the exact directory entry to be absent after launch, so a
+dangling symlink cannot satisfy a postcondition.
+
+This boundary prevents shell injection; it does not make third-party code
+trusted. `npx` may download and execute the pinned npm-hosted `skills` package,
+and that CLI downloads community-authored skill content. The app therefore ships
+without App Sandbox so the child process can reach Node, the network, and
+supported agent directories, but the target enables Hardened Runtime. Install
+only from sources you trust and review `SKILL.md` before an agent uses it. See
+[Security](docs/SECURITY.md) for the pinned package record, upstream limitation,
+and deliberately accepted residual risks.
 
 Text extracted from an installed `SKILL.md` is also untrusted. The library
 renders its overview as non-interactive text, so Markdown destinations do not
@@ -147,24 +173,22 @@ convention Codex also reads, so both suggestions appear when that folder exists.
 Adding the second one re-selects the folder the first one configured instead of
 listing it twice.
 
-Direct add works whenever Skills Manager already has access to the folder. A
-sandboxed build only receives access to folders the user confirms, so when the
-sandbox denies a suggestion the app falls back to the system directory picker
-opened at that same location. Empty library states open Settings rather than
-duplicating this picker flow. Settings itself includes an Add Folder action when
-the list is empty. If the operating system cannot resolve the signed-in
-account's home directory, Skills Manager suppresses home-based suggestions and
-picker defaults instead of substituting its sandbox container.
+Direct add uses the account-home path. Empty library states open Settings rather
+than duplicating the picker flow, and Settings includes an Add Folder action when
+the list is empty. If the operating system cannot resolve the signed-in account's
+home directory, Skills Manager suppresses home-based suggestions and picker
+defaults instead of guessing, and lifecycle operations fail before launching a
+process.
 
-Confirmed directories are opened as security-scoped resources before the app
-creates and stores their bookmarks. This keeps the initial scan and access after
-relaunch covered by the same user grant. Settings opens without selecting a
-folder on the user's behalf. Each row can pause or resume scanning, unavailable
-rows can reconnect through the system picker, and paths under the home directory
-are abbreviated with `~`. Selecting a row and using the minus control removes
-only the Skills Manager configuration after confirmation; the folder and its
-files remain on disk. Path abbreviation is skipped when the account home cannot
-be resolved.
+The app stores configured directory URLs in its application-support data and
+ships without App Sandbox so the official CLI can perform lifecycle operations.
+Settings opens without selecting a folder on the user's behalf. Each row can
+pause or resume scanning, unavailable rows can reconnect through the system
+picker, and paths under the home directory are abbreviated with `~`. Selecting a
+directory row and using the minus control removes only the Skills Manager
+configuration; selecting a skill and confirming Remove from Disk invokes the CLI
+and deletes that skill directory. Path abbreviation is skipped when the account
+home cannot be resolved.
 
 ## Repository layout
 
@@ -174,7 +198,6 @@ SkillsManager/                  SwiftUI application target
   Features/                     feature-oriented views
   Shared/                       reusable app-only presentation components
   Resources/                    asset catalogs
-  Support/                      entitlements and target support files
 Packages/SkillsCore/            platform-light domain package and tests
 Tests/SkillsManagerTests/       app-state unit tests
 docs/                           architecture and engineering decisions
@@ -184,7 +207,8 @@ SkillsManager.xcodeproj/        generated, committed Xcode project
 
 See [Architecture](docs/ARCHITECTURE.md) for dependency boundaries and planned
 extension points. See [AGENTS.md](AGENTS.md) for repository conventions that
-apply to both human and AI contributors.
+apply to both human and AI contributors, and [Security](docs/SECURITY.md) for the
+CLI trust boundary.
 
 ## License
 

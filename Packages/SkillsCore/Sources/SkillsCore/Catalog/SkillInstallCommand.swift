@@ -4,8 +4,8 @@ import Foundation
 ///
 /// The value is rebuilt locally from validated catalog fields rather than scraped from
 /// the remote page, and it is modelled as a program plus an argument vector so no caller
-/// can hand a remote-sourced string to a shell. Skills Manager displays it and copies it;
-/// it never executes it.
+/// can hand a remote-sourced string to a shell. Skills Manager can display this value or
+/// pass its validated argument vector directly to `npx`; it never executes it through a shell.
 public struct SkillInstallCommand: Hashable, Sendable {
     /// The program a user would run in their own terminal.
     public let program: String
