@@ -92,6 +92,17 @@ hand-off when full Xcode is available. If Xcode is unavailable, run
   leaderboard and search results with `CatalogSkillSorter.byDownloads`. A search
   response arrives in relevance order, so skipping the sorter silently changes
   the ranking the product promises.
+- Treat update availability as the invariant primary partition for every
+  library sort. Preserve the selected name, date-added, or agent order and its
+  stable tie breakers within both the update and current partitions. Present an
+  available update with visible text and a symbol, and include `Update available`
+  in the row's explicit combined accessibility label; color alone is not enough.
+- Run one update-availability check only after restored sources finish scanning.
+  Clear prior positive detections before awaiting the result, apply a successful
+  result to every matching installation directory name in one main-actor update,
+  and distinguish idle, checking, current, and unavailable UI states. A
+  cancellation or error must leave no positive update claim. Preserve an
+  authoritative detection result across later source rescans.
 
 ## Testing conventions
 
@@ -119,8 +130,10 @@ Hardened Runtime enabled for the app target even while App Sandbox is disabled.
 
 Never log skill contents, tokens, credentials, the inherited environment, CLI
 output, or user-specific absolute paths. Keep process standard input, output,
-and error disconnected unless a separately reviewed UI securely presents a
-bounded diagnostic.
+and error disconnected except for the update-availability probe's reviewed,
+bounded, owner-only stdout capture. That capture is parser input only; never
+render or log its raw contents. Any other diagnostic path requires a separate
+security review and a bounded presentation design.
 
 Serialize source-configuration mutations across their persistence commit or
 rollback; MainActor isolation alone is reentrant across an `await`. Release that
@@ -177,19 +190,21 @@ never copy the parent `PATH` into the child. Put the resolved executable's
 directory first, followed only by the fixed Homebrew and system directories
 needed for Node and Git. Reject a non-absolute resolved executable directory or
 one containing the `PATH` delimiter instead of splitting it into unintended
-search locations. Child environments are allowlists: pass only the account home,
-that constructed path, locale and temporary-directory values, telemetry
-opt-outs, and explicit npm settings. Pin lifecycle execution to the reviewed
-`skills@1.5.21` package from `https://registry.npmjs.org/`, disable npm lifecycle
+search locations. Child environments are allowlists: pass only the applicable
+real or disposable home, that constructed path, locale and temporary-directory
+values, telemetry opt-outs, and explicit npm settings. Pin lifecycle execution
+to the reviewed `skills@1.5.21` package from `https://registry.npmjs.org/`,
+disable npm lifecycle
 scripts, ignore user/global npm configuration, and run from a fresh owner-only
 empty directory so a local package cannot shadow the selected binary. Do not
 forward unrelated parent variables, proxy credentials, tokens, or secrets.
 
-The shared `SkillsCLIManager` must serialize install, update, and remove calls so
-the CLI cannot race its own lock-file mutations. Every directly launched process
-must have a finite deadline and stop promptly when its calling task is cancelled,
-escalating to a forced stop after the grace period. Keep the liveness check and
-`SIGKILL` in the same lock scope so a reaped pid cannot be reused between them.
+The shared `SkillsCLIManager` must serialize availability, install, update, and
+remove calls so the CLI cannot race its own lock-file mutations. Every directly
+launched process must have a finite deadline and stop promptly when its calling
+task is cancelled, escalating to a forced stop after the grace period. Keep the
+liveness check and `SIGKILL` in the same lock scope so a reaped pid cannot be
+reused between them.
 User-facing errors must disclose that unsupervised descendant work may continue.
 Reject symbolic links in every mutable source, skill, and manifest path before
 launch and verify the boundary again afterward. A new install destination must
@@ -204,15 +219,52 @@ name-only delta detects changes inside preexisting entries or provides rollback.
 Remove requires the exact directory entry, including a dangling symlink, to be
 absent after a zero exit status.
 
-Upstream `skills@1.5.21` update accepts only global/project scope and skill-name
-filters; it has no agent selector. Do not invoke it from a per-source app action,
-because it can reconcile shared lock state outside the selected agent directory.
-Fail closed with `scopedUpdateUnsupported` until a separately reviewed upstream
-contract makes the mutation agent-scoped. Treat each selected skill or
-destination as an independent outcome, preserve failures in the UI, and rescan
-disk after successes. Removal confirmation must say that files are deleted;
-never reuse the old non-destructive “Remove from Library” language for skill
-removal.
+Upstream `skills@1.5.21` routes `check`, `update`, and `upgrade` through the same
+mutating update implementation. It accepts only global/project scope and
+skill-name filters, has no agent selector, and exposes no JSON result for
+`check`. Do not run any of those paths against the account's real home or from a
+per-source update action, because they can reconcile shared lock state and
+reinstall content outside the selected agent directory. The actual update
+action must continue to fail closed with `scopedUpdateUnsupported` until a
+separately reviewed upstream contract makes the mutation agent-scoped.
+
+Update availability is the one reviewed use of that mutating path. It must read
+and validate only `~/.agents/.skill-lock.json`: reject symbolic links and
+non-regular files, input over 1 MiB, any schema other than version 3, more than
+10,000 entries, unsafe installation names, non-HTTPS or credential-bearing
+remote sources, inconsistent metadata grouped under one source, unsupported
+source types, unsafe relative manifest paths, and incomplete hashes or metadata.
+Re-encode only the validated fields as a canonical lock inside a fresh `0700`
+disposable home, with the mirrored lock at `0600`. Create a separate `0700`
+working directory and `0600` stdout file, then
+launch only this exact argument vector through the existing serialized manager:
+
+```text
+npx --yes --package skills@1.5.21 -- skills check --global --yes
+```
+
+Use the existing environment allowlist, but redirect `HOME`, `CODEX_HOME`, and
+`TMPDIR` into the disposable home. Do not expose a real skills directory,
+project lock, inherited npm/Git configuration, credentials, or unrelated parent
+variables. Pre-open the owner-only stdout file before launch, bound the pipe to
+256 KiB while streaming, and return the captured bytes without reopening a
+child-writable pathname; exceeding the limit must stop the direct process and
+fail closed. After a zero exit, require bounded UTF-8 and parse only the reviewed
+transcript grammar in its expected order. Reject
+unknown terminal controls or lines, failure/skip/deletion diagnostics,
+unexpected or duplicate names and sources, and inconsistent found/update/
+summary counts. Return only names present in the validated lock. Deferred
+cleanup must cover the stdout file, working directory, canonical lock, and full
+disposable home after success, launch failure, nonzero exit, timeout,
+cancellation, and parse failure. Direct the reviewed upstream path's downloads
+and installs into that disposable home and never provide a real skill path, but
+do not describe this environment configuration as a filesystem sandbox or
+upstream `check` as read-only.
+
+Treat each selected skill or destination as an independent lifecycle outcome,
+preserve failures in the UI, and rescan disk after successes. Removal
+confirmation must say that files are deleted; never reuse the old
+non-destructive “Remove from Library” language for skill removal.
 
 Treat text extracted from an installed `SKILL.md` as untrusted presentation
 input. Its library overview must remain non-interactive. Markdown styling may be

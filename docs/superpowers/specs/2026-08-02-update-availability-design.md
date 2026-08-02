@@ -37,11 +37,13 @@ and performs these steps:
    npx --yes --package skills@1.5.21 -- skills check --global --yes
    ```
 
-4. Give the child only the existing scrubbed environment, but point `HOME` and
-   `CODEX_HOME` into the disposable home. No real agent directory, package
-   manager configuration, credential environment variable, or project lock is
-   exposed.
-5. After a zero exit, reject oversized or non-UTF-8 output, unknown terminal
+4. Give the child only the existing scrubbed environment, but point `HOME`,
+   `CODEX_HOME`, and `TMPDIR` into the disposable home. No real agent directory,
+   package manager configuration, credential environment variable, or project
+   lock is exposed.
+5. Open the private stdout file before launch, stream through a bounded pipe,
+   and parse the returned bytes without reopening a pathname the child could
+   replace. After a zero exit, reject oversized or non-UTF-8 output, unknown terminal
    controls, unknown lines, failure/skip/deletion diagnostics, duplicate names,
    names not present in the validated lock, or inconsistent found/update/summary
    counts. Return only the validated set of updated skill directory names.
@@ -91,6 +93,8 @@ cancellation, and cleanup. Model tests cover successful mapping and fail-closed
 state. Sorter tests prove update-first ordering for every sort choice and
 deterministic order within both partitions.
 
-The Windows implementation host has no Swift or Xcode toolchain. Static checks
-and diff review can run here, but compilation, all Swift tests, and the macOS UI
-check remain explicit QA gates on the committed revision before any PR.
+The Windows implementation host has no Xcode or macOS runtime. A Swift 6.2 Linux
+container can compile and exercise a focused SkillsCore harness, but the complete
+package still encounters existing Linux-only Foundation API gaps and app/model/UI
+tests require macOS. Those complete checks remain explicit QA gates on the
+committed revision before any PR.

@@ -24,9 +24,10 @@ The current product surface includes:
   displays the page's install command with a copy action;
 - installation into one or many supported agent directories through the official
   `skills` CLI;
-- name, date-added, and agent sorting, with the agent and source shown on every
-  skill row;
-- CLI-backed on-disk removal and a fail-closed update action, plus controls for
+- name, date-added, and agent sorting with updates kept first, the agent and
+  source shown on every row, and an accessible text-and-symbol update badge;
+- an isolated, fail-closed availability check, CLI-backed on-disk removal, and
+  an intentionally unavailable per-skill update action, plus controls for
   enabling, revealing, opening, and copying the path of a skill;
 - directory rename, agent assignment, enable, rescan, reveal, and remove
   controls;
@@ -97,14 +98,50 @@ per selected directory and reports one outcome per directory, so one failure doe
 not stop the remaining installs. Successful installs are rescanned from disk and
 selected in the library.
 
-Update and remove actions use the same lifecycle boundary. The pinned upstream
-CLI can filter an update by skill and global/project scope, but release 1.5.21
-has no `--agent` option for update. Skills Manager therefore refuses update
-before process launch rather than risk changing the same skill in other agent
-directories. Reinstall from a reviewed source is the current safe refresh path.
-Remove deletes successful skill directories from the library and disk, rescans
-affected sources, and leaves failed selections visible. Busy state prevents the
-same skill from receiving overlapping mutations.
+Update availability and update execution deliberately use different contracts.
+In pinned release `skills@1.5.21`, `skills check` dispatches to the same updater
+as `update` and can download and reinstall skills; it is not a read-only command
+and provides no JSON mode. Skills Manager therefore treats `check` as a
+mutating probe. It reads only the real `~/.agents/.skill-lock.json`, rejects an
+unsafe, oversized, unsupported, or incomplete lock, and writes a canonical copy
+containing only validated update fields into a new owner-only disposable home.
+It then runs exactly:
+
+```text
+npx --yes --package skills@1.5.21 -- skills check --global --yes
+```
+
+The probe receives the normal scrubbed environment with `HOME`, `CODEX_HOME`,
+and `TMPDIR` redirected into that disposable home. It runs from a separate
+owner-only working directory and captures at most 256 KiB of stdout. The runner
+opens an owner-only output file before launch, drains the child through a bounded
+pipe, and parses those captured bytes without reopening a child-writable path.
+It never receives a path to a real skill installation. After a zero exit, Skills
+Manager accepts only the reviewed text transcript in its expected order: unknown
+controls or lines, unexpected names or sources, duplicate names, failure or
+deletion diagnostics, malformed UTF-8, and inconsistent counts all fail closed.
+Deferred cleanup covers the canonical lock, captured output, working directory,
+and complete disposable home on success, failure, launch error, timeout,
+cancellation, and parse failure.
+
+One availability check runs after restored sources finish scanning. A completed
+result is authoritative for matching installation directory names; an error or
+cancellation clears prior positive claims. Skills with confirmed updates form
+the first partition of every name, date-added, or agent sort while preserving
+the selected order within both partitions. Each affected row presents both the
+word `Update` and a download symbol, and its combined accessibility label says
+`Update available`. The Updates Available empty state distinguishes not checked,
+checking, unavailable, and confirmed-current results and offers a safe retry
+when appropriate.
+
+The actual per-skill update action remains fail-closed. Release 1.5.21 can
+filter an update by skill and global/project scope, but has no `--agent` option;
+Skills Manager refuses the action before process launch rather than risk
+changing shared lock state or another agent directory. Reinstall from a reviewed
+source is the current safe refresh path. Remove deletes successful skill
+directories from the library and disk, rescans affected sources, and leaves
+failed selections visible. Busy state prevents the same skill from receiving
+overlapping mutations.
 
 ### The install command
 
@@ -130,10 +167,13 @@ non-interactive npm settings. Empty, relative, and delimiter-unsafe executable
 search locations are rejected. The app uses the public npm registry, disables
 lifecycle scripts, and runs from a new owner-only empty working directory.
 Unrelated parent variables, arbitrary inherited `PATH` entries, npm
-configuration, and secrets are not forwarded. Standard input and output are
-disconnected. A five-minute deadline and task cancellation stop the directly
-launched `npx` process, with a forced stop after a grace period. Descendant work
-started by that process is not supervised and may continue.
+configuration, and secrets are not forwarded. Install and remove disconnect
+standard input, output, and error. The isolated availability probe is the sole
+reviewed exception: input and error remain disconnected while stdout is captured
+through the bounded private file described above; raw output is never logged or
+shown. A five-minute deadline and task cancellation stop the directly launched
+`npx` process, with a forced stop after a grace period. Descendant work started
+by that process is not supervised and may continue.
 
 Lifecycle paths may not contain symbolic links. Install requires its exact
 destination to be absent before launch, then requires a real destination

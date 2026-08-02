@@ -58,10 +58,10 @@ cancellation, or absent expected manifest, the error reports a bounded, escaped
 delta of entries observed so far and leaves those entries on disk for review
 rather than silently deleting untrusted content.
 
-Update is deliberately unavailable in the production manager. In release
-1.5.21, `skills update` accepts global/project scope, confirmation, and
-positional skill filters, but no `--agent` selector. Its global path reads the
-shared lock and reinstalls through `add`. Calling it from a source-scoped app
+The actual update action is deliberately unavailable in the production manager.
+In release 1.5.21, `skills update` accepts global/project scope, confirmation,
+and positional skill filters, but no `--agent` selector. Its global path reads
+the shared lock and reinstalls through `add`. Calling it from a source-scoped app
 action could therefore mutate other agent directories. Skills Manager validates
 the selected source and skill, then fails before process launch with an
 actionable error. A reviewed reinstall is the safe refresh path until upstream
@@ -69,6 +69,70 @@ adds an agent-scoped update contract. A published-package probe also confirmed
 that attempting `skills update --agent codex --global --yes` does not add an
 agent boundary: `--agent` is ignored by the update parser and `codex` is treated
 as a positional skill-name filter.
+
+## Update availability containment
+
+The pinned release routes `skills check`, `skills update`, and `skills upgrade`
+through the same update implementation. A global `check` compares lock hashes
+and then uses the add flow for every update it finds, so it can download and
+install code. The release provides no JSON output for this operation. Skills
+Manager consequently treats availability as a destructive probe and never runs
+it with the signed-in account's real `HOME` or `CODEX_HOME`.
+
+Before launch, the manager reads only `~/.agents/.skill-lock.json`. It rejects a
+symbolic link anywhere from the resolved account home through that path, a
+non-regular file, a file larger than 1 MiB, a schema other than version 3, or
+more than 10,000 skill entries. Each entry must use a validated installation
+directory name; a reviewed `github`, `gitlab`, or `git` source type; an HTTPS
+source URL without credentials, query, or fragment; source metadata that agrees
+within every upstream source group; a bounded relative path ending in `SKILL.md`;
+a 40- or 64-character ASCII hexadecimal folder hash; and bounded, control-free
+metadata. Any incomplete or unsafe entry invalidates the entire check before
+`npx` launches.
+
+Decoding uses a closed schema. The manager then writes only those validated
+fields, sorted and canonicalized, to `.agents/.skill-lock.json` inside a newly
+created `0700` disposable home; the lock is `0600`. A separate `0700` working
+directory contains a pre-created `0600` stdout file. The exact direct invocation
+is:
+
+```text
+npx --yes --package skills@1.5.21 -- skills check --global --yes
+```
+
+The existing environment allowlist is retained, except `HOME` points to the
+disposable home, `CODEX_HOME` points to its `.agents` directory, and `TMPDIR`
+points to an owner-only directory in the same disposable tree. No real
+installation directory, project lock, inherited npm/Git configuration,
+credential variable, token, proxy secret, or unrelated parent variable is
+forwarded. The reviewed upstream path is directed into the disposable tree and
+receives no explicit path to a real skill installation; this process
+configuration is containment, not a filesystem sandbox. Standard input and
+error remain disconnected. The runner opens the owner-only stdout file before
+launch, drains the process through a pipe, and caps it at 256 KiB; exceeding the
+cap stops the direct process and produces no availability result.
+
+After a zero exit, the runner persists through the already-open file handle and
+returns those same bounded bytes. The parser never reopens the child-writable
+pathname, so replacing it cannot redirect a parent write or the parsed input.
+The bytes must be valid UTF-8. The parser strips only the reviewed ANSI
+sequences and accepts only a complete known transcript: one header, every
+expected lock source exactly once, and then either a confirmed all-current line
+or consistent positive
+found/update/summary counts with matching `Updating` and `Updated` lines. Unknown
+terminal controls or lines, unexpected or duplicate names and sources,
+failure/skip/deletion diagnostics, partial results, and any count mismatch fail
+closed. Returned names must already exist in the validated lock. Raw lock data
+and raw CLI output are never logged or presented.
+
+Deferred removal covers the stdout file, working directory, canonical lock, and
+complete disposable home on success, launch failure, nonzero exit, timeout,
+cancellation, and parse failure. The availability result is applied only after
+restored sources have finished scanning. Until a complete result is accepted,
+the model makes no positive update claim; cancellation and every error clear
+prior positives. This containment discovers availability only. It does not make
+the app's actual update action agent-scoped, so that action remains fail-closed
+as described above.
 
 ## Automatic source discovery and persistence
 
@@ -147,6 +211,11 @@ design.
 These controls deliberately do not claim a complete software-supply-chain or
 content sandbox:
 
+- The availability check intentionally executes a mutating, network-capable
+  upstream path. Redirected homes, a scrubbed environment, bounded output, and
+  deferred deletion of the disposable trees avoid giving that reviewed path an
+  explicit real skill location, but they do not sandbox `npx`, Node, Git, or
+  downloaded code from the signed-in user's ambient permissions.
 - npm registry TLS and registry-supplied integrity metadata remain trusted. The
   known top-level tarball hash is recorded for review, but the app does not
   independently download and attest the tarball or pin every transitive runtime
@@ -170,7 +239,8 @@ content sandbox:
 - Deadline and cancellation signals target the launched `npx` process. The app
   does not create and supervise a separate POSIX process group for every
   descendant the upstream CLI may spawn, so descendant work may continue after
-  the direct process is reported stopped.
+  the direct process is reported stopped, including during a disposable-home
+  availability probe.
 - Disabling App Sandbox gives the app and child process the signed-in user's
   ambient filesystem access. Hardened Runtime does not replace sandbox
   isolation.

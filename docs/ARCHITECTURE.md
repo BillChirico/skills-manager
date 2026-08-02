@@ -26,17 +26,21 @@ network, filesystem, persistence, or process work directly.
 
 `SkillsManagerApp` creates one `SkillsCLIManager` and injects that same actor into
 the catalog and library models. Sharing the instance ensures catalog installs and
-library updates or removals pass through one serialized mutation boundary.
+library availability checks, updates, or removals pass through one serialized
+operation boundary.
 
 `SkillLibraryModel` coordinates configured sources, restoration, discovery,
-selection, scoped search, and lifecycle results. Update and remove methods are
-asynchronous, expose per-skill busy state, preserve failed items, and rescan disk
-after successes. Restoration also detects every supported agent's standard
-directory that already exists under the account home, merges new candidates
-with persisted sources and their durable removal exclusions, publishes the
-reconciled configuration in memory, and attempts an atomic normalization save
-without making scanning depend on that save succeeding; see
-[Automatic agent-folder detection](#automatic-agent-folder-detection).
+selection, scoped search, update availability, and lifecycle results. Update and
+remove methods are asynchronous, expose per-skill busy state, preserve failed
+items, and rescan disk after successes. Restoration also detects every supported
+agent's standard directory that already exists under the account home, merges
+new candidates with persisted sources and their durable removal exclusions,
+publishes the reconciled configuration in memory, and attempts an atomic
+normalization save without making scanning depend on that save succeeding. Once
+all restored-source scans finish, the model performs one serialized availability
+check and applies its authoritative name set in one main-actor update; see
+[Automatic agent-folder detection](#automatic-agent-folder-detection) and
+[Update availability isolation](#update-availability-isolation).
 `SkillCatalogModel` owns the skills.sh leaderboard, search state, and
 per-destination install outcomes. `SkillCatalogView` rescans each successful
 destination and selects the installed skill.
@@ -59,7 +63,7 @@ explicitly destructive CLI action.
 - filtering, search, and deterministic sorters;
 - `SkillCatalogSearching` and the skills.sh client;
 - `CatalogIdentifier` and `SkillInstallCommand` for untrusted catalog fields;
-- `SkillManaging`, the injected install/update/remove boundary; and
+- `SkillManaging`, the injected availability/install/update/remove boundary; and
 - `SkillsCLIManager`, its actor-backed official-CLI implementation.
 
 Tests use actors, in-memory fakes, and unique temporary directories. They never
@@ -129,21 +133,79 @@ rejected before launch.
 
 The manager launches `Process` directly. The executable URL and argument vector
 remain separate, and no operation uses a shell. Package selection is explicit,
-and each invocation runs in a newly created owner-only empty directory. Exact
-non-interactive forms are:
+and each invocation runs in a newly created owner-only empty working directory.
+The exact non-interactive mutation forms are:
 
 ```text
 npx --yes --package skills@1.5.21 -- skills add <repository> --skill <slug> --global --agent <agent> --copy --yes
 npx --yes --package skills@1.5.21 -- skills remove <slug> --global --agent <agent> --yes
 ```
 
-The official 1.5.21 update parser accepts `--global`, `--project`, `--yes`, and
-positional skill names, but no `--agent`. Its global implementation reads shared
-lock state and reinstalls through `add`, so a successful call cannot prove it
-mutated only the selected source. The app validates the selected source and skill
-then returns `scopedUpdateUnsupported` without launching a process. Reinstalling
-from a reviewed source is the supported refresh path until upstream exposes an
-agent-scoped contract.
+The exact availability probe is:
+
+```text
+npx --yes --package skills@1.5.21 -- skills check --global --yes
+```
+
+The official 1.5.21 implementation routes `check`, `update`, and `upgrade` to the
+same update handler. The handler accepts `--global`, `--project`, `--yes`, and
+positional skill names but no `--agent`; its global path reads shared lock state
+and reinstalls through `add`. It also has no JSON output mode. A successful call
+against the account home therefore cannot prove it only observed state or
+mutated one selected source. The per-skill app action validates its source and
+skill, then returns `scopedUpdateUnsupported` without launching a process.
+Reinstalling from a reviewed source is the supported refresh path until upstream
+exposes an agent-scoped mutation contract.
+
+### Update availability isolation
+
+`SkillsCLIManager.checkForUpdates()` treats the upstream command as a destructive
+probe and shares the manager's FIFO operation gate with install, update, and
+remove. Its only real-home input is `~/.agents/.skill-lock.json`; it never scans
+another agent directory or a project lock. The reader rejects a symlink anywhere
+from the resolved account home through the lock, any non-regular lock, any lock
+greater than 1 MiB, JSON other than schema version 3, and more than 10,000 skill
+entries.
+Each retained entry must have a safe installation directory name, one of the
+reviewed `github`, `gitlab`, or `git` source types, semantically matching HTTPS
+source metadata without credentials, query, or fragment, a safe relative path
+ending in `SKILL.md`, a 40- or 64-character ASCII hexadecimal folder hash, and
+bounded non-control metadata. Entries grouped under one source must agree on
+source type, URL, and ref because upstream uses the group's first entry.
+
+The validated value is decoded into a closed schema and re-encoded with sorted
+keys. Unrecognized root or entry fields are therefore omitted rather than copied
+into the probe. The manager creates a fresh `0700` disposable home, a canonical
+`.agents/.skill-lock.json` at `0600`, a separate `0700` working directory, and a
+`0600` stdout file inside that directory. It uses the normal environment
+allowlist but points `HOME`, `CODEX_HOME`, and `TMPDIR` into the disposable home.
+No real skill installation path, project lock, user/global package-manager
+configuration, inherited credential, or unrelated parent variable reaches the
+child. The reviewed upstream path directs repository downloads and installations
+under the disposable home and receives no explicit real skill path. This is
+process configuration, not a filesystem sandbox; the security document records
+the remaining ambient-access risk.
+
+The process runner opens the owner-only stdout file before launch, drains the
+child through a pipe while it executes, and enforces a 256 KiB ceiling; crossing
+it requests termination and fails closed. Standard input and error remain
+disconnected. After a zero exit, the runner persists through that already-open
+handle and returns the same bounded bytes, so the parser never reopens a pathname
+the child could replace. The manager requires UTF-8, removes only the exact ANSI
+sequences present in the reviewed transcript, and then accepts in order either:
+
+- one header, every expected lock source exactly once, and the all-current line;
+  or
+- one header, every expected source, positive found and summary counts, and one
+  matching `Updating` and `Updated` pair for every returned lock skill name.
+
+Any unknown terminal control or line, unexpected or duplicate source/name,
+failure/skip/deletion diagnostic, inconsistent count, or partial transcript is
+an error; raw output is neither logged nor presented. The returned value is only
+the validated set of installation directory names. Deferred cleanup covers the
+captured output, working directory, canonical lock, and complete disposable home
+after success, launch failure, nonzero exit, timeout, cancellation, and parse
+failure. An empty validated lock returns an empty set without launching `npx`.
 
 Supported mappings are:
 
@@ -165,18 +227,21 @@ readable but lifecycle changes return an actionable unsupported-source error. If
 the account home cannot be resolved, lifecycle operations fail closed before
 resolving `npx` or launching a process.
 
-The child environment is an allowlist: account home, the constructed executable
-path, locale and temporary-directory settings, telemetry opt-outs, and explicit
-npm/Git settings. npm is fixed to `https://registry.npmjs.org/`, lifecycle scripts
-are disabled, online metadata is preferred, and user/global npm and Git
-configuration are ignored. Unrelated variables and secrets are not forwarded.
-Standard input, output, and error use the null device. A nonzero status becomes a
-typed error without exposing unbounded CLI output. The runner has a five-minute
-deadline, propagates task cancellation, sends termination first, and force-kills
-the directly launched `npx` process after a one-second grace period if it is
-still running. The liveness check and `SIGKILL` share one lock scope. Descendants
-are not placed in a supervised process group and may continue after the direct
-process exits; timeout and cancellation errors disclose this limit.
+The child environment is an allowlist: the applicable real or disposable home,
+the constructed executable path, locale and temporary-directory settings,
+telemetry opt-outs, and explicit npm/Git settings. npm is fixed to
+`https://registry.npmjs.org/`, lifecycle scripts are disabled, online metadata
+is preferred, and user/global npm and Git configuration are ignored. Unrelated
+variables and secrets are not forwarded. Install and remove send standard input,
+output, and error to the null device. The isolated availability probe keeps input
+and error disconnected and captures only bounded stdout as described above. A
+nonzero status becomes a typed error without exposing raw CLI output. The runner
+has a five-minute deadline, propagates task cancellation, sends termination
+first, and force-kills the directly launched `npx` process after a one-second
+grace period if it is still running. The liveness check and `SIGKILL` share one
+lock scope. Descendants are not placed in a supervised process group and may
+continue after the direct process exits; timeout and cancellation errors
+disclose this limit.
 
 Postconditions cannot be satisfied by stale state. Install requires the exact
 destination entry to be absent before launch and snapshots the source's entry
@@ -198,6 +263,27 @@ runner is awaited, so lock-file mutations cannot overlap.
 One selected destination or skill is one outcome. Catalog installation continues
 after a destination failure. Library update and removal likewise continue after
 an individual failure and present a concise combined error.
+
+`AgentSkill.isUpdateAvailable` is optional so previously encoded values remain
+compatible. When non-nil it is authoritative; installed/available version
+comparison is only the legacy fallback before a check has supplied a detection.
+After restoration finishes scanning every enabled source,
+`SkillLibraryModel.refreshUpdateAvailability()` marks the check as running and
+clears earlier positive detections before awaiting `SkillManaging`. A successful
+set is applied to every skill whose installation directory name matches, in one
+main-actor pass, and the state becomes current. A cancellation returns to idle;
+every other error leaves detections non-positive, marks availability unavailable,
+and uses the existing safe alert path. A later source rescan preserves the last
+authoritative detection.
+
+`SkillLibrarySorter` treats `hasUpdate` as an invariant first key. The user's
+name, newest-date, or agent/source selection remains the secondary order inside
+the update and current partitions; relative path and then source ID provide the
+stable final tie breakers. An update row shows the text `Update` with a filled
+download symbol and includes `Update available` in its combined accessibility
+label, so the state does not depend on color. The Updates Available empty state
+distinguishes idle, checking, current, and unavailable results and offers a
+manual retry for idle or unavailable state.
 
 The production manager currently returns an explicit failure for every update,
 so the model reports the upstream limitation and does not rescan on that path.
@@ -273,7 +359,8 @@ The library title reports the selected scope and item count. Toolbar actions kee
 discovery and Settings separate from sort/search controls. Static content uses
 semantic backgrounds; Liquid Glass is reserved for interactive controls. Busy,
 paused, scanning, and unavailable states use accessible text or labels rather
-than color alone.
+than color alone. Update availability likewise uses visible text plus a symbol
+and remains part of the row's explicit accessibility label.
 
 ## Project generation
 
