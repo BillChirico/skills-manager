@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(Darwin)
+    import Darwin
+#elseif canImport(Glibc)
+    import Glibc
+#endif
 
 public struct SkillSourceConfiguration: Equatable, Sendable, Codable {
     public var sources: [SkillSource]
@@ -66,9 +71,21 @@ public actor JSONSkillSourceStore: SkillSourceStore {
     private static let filePermissions = 0o600
 
     private let fileURL: URL
+    private let commitFile: @Sendable (URL, URL) throws -> Void
 
     public init(fileURL: URL) {
         self.fileURL = fileURL
+        self.commitFile = { temporaryURL, destinationURL in
+            try Self.commitTemporaryFile(temporaryURL, destinationURL)
+        }
+    }
+
+    init(
+        fileURL: URL,
+        commitFile: @escaping @Sendable (URL, URL) throws -> Void
+    ) {
+        self.fileURL = fileURL
+        self.commitFile = commitFile
     }
 
     public func loadSources() throws -> [SkillSource] {
@@ -119,21 +136,84 @@ public actor JSONSkillSourceStore: SkillSourceStore {
         _ configuration: SkillSourceConfiguration
     ) throws {
         let fileManager = FileManager()
+        let directoryURL = fileURL.deletingLastPathComponent()
         try fileManager.createDirectory(
-            at: fileURL.deletingLastPathComponent(),
+            at: directoryURL,
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: Self.directoryPermissions]
+        )
+        try fileManager.setAttributes(
+            [.posixPermissions: Self.directoryPermissions],
+            ofItemAtPath: directoryURL.path
         )
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(configuration)
-        try data.write(to: fileURL, options: .atomic)
+        let temporaryURL = directoryURL.appending(
+            path: ".\(fileURL.lastPathComponent).\(UUID().uuidString).tmp",
+            directoryHint: .notDirectory
+        )
+        defer { try? fileManager.removeItem(at: temporaryURL) }
 
-        // An atomic write replaces the file, so permissions are applied afterwards.
+        guard
+            fileManager.createFile(
+                atPath: temporaryURL.path,
+                contents: data,
+                attributes: [.posixPermissions: Self.filePermissions]
+            )
+        else {
+            throw CocoaError(
+                .fileWriteUnknown,
+                userInfo: [NSFilePathErrorKey: temporaryURL.path]
+            )
+        }
         try fileManager.setAttributes(
             [.posixPermissions: Self.filePermissions],
-            ofItemAtPath: fileURL.path
+            ofItemAtPath: temporaryURL.path
         )
+        try commitFile(temporaryURL, fileURL)
+    }
+
+    private static func commitTemporaryFile(
+        _ temporaryURL: URL,
+        _ destinationURL: URL
+    ) throws {
+        #if canImport(Darwin) || canImport(Glibc)
+            let result = temporaryURL.withUnsafeFileSystemRepresentation { temporaryPath in
+                guard let temporaryPath else {
+                    errno = EINVAL
+                    return Int32(-1)
+                }
+
+                return destinationURL.withUnsafeFileSystemRepresentation { destinationPath in
+                    guard let destinationPath else {
+                        errno = EINVAL
+                        return Int32(-1)
+                    }
+
+                    #if canImport(Darwin)
+                        return Darwin.rename(temporaryPath, destinationPath)
+                    #else
+                        return Glibc.rename(temporaryPath, destinationPath)
+                    #endif
+                }
+            }
+            guard result == 0 else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+        #else
+            let fileManager = FileManager()
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                _ = try fileManager.replaceItemAt(
+                    destinationURL,
+                    withItemAt: temporaryURL,
+                    backupItemName: nil,
+                    options: .usingNewMetadataOnly
+                )
+            } else {
+                try fileManager.moveItem(at: temporaryURL, to: destinationURL)
+            }
+        #endif
     }
 }

@@ -12,7 +12,7 @@ struct JSONSkillSourceStoreTests {
         )
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        let store = JSONSkillSourceStore(
+        let store: any SkillSourceStore = JSONSkillSourceStore(
             fileURL: directory.appending(
                 path: "sources.json",
                 directoryHint: .notDirectory
@@ -35,6 +35,46 @@ struct JSONSkillSourceStoreTests {
         let loaded = try await store.loadConfiguration()
 
         #expect(loaded == configuration)
+    }
+
+    @Test("A failed commit preserves the last good configuration")
+    func failedCommitPreservesLastGoodConfiguration() async throws {
+        struct CommitError: Error {}
+
+        let directory = FileManager.default.temporaryDirectory.appending(
+            path: "SkillsCoreStoreTests-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let fileURL = directory.appending(
+            path: "sources.json",
+            directoryHint: .notDirectory
+        )
+        let originalSource = SkillSource(
+            name: "Original Skills",
+            directoryURL: URL(filePath: "/skills/original")
+        )
+        let replacementSource = SkillSource(
+            name: "Replacement Skills",
+            directoryURL: URL(filePath: "/skills/replacement")
+        )
+        let readableStore = JSONSkillSourceStore(fileURL: fileURL)
+        try await readableStore.save([originalSource])
+        let failingStore = JSONSkillSourceStore(
+            fileURL: fileURL,
+            commitFile: { _, _ in throw CommitError() }
+        )
+
+        await #expect(throws: CommitError.self) {
+            try await failingStore.save([replacementSource])
+        }
+
+        #expect(try await readableStore.loadSources() == [originalSource])
+        #expect(
+            try FileManager.default.contentsOfDirectory(atPath: directory.path)
+                == ["sources.json"]
+        )
     }
 
     @Test("A legacy source array loads as a configuration without exclusions")
