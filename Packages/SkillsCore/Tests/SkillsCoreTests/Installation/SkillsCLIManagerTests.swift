@@ -54,11 +54,119 @@ struct SkillsCLIManagerTests {
         )
         #expect(command.executableURL == URL(filePath: "/usr/local/bin/npx"))
         #expect(command.currentDirectoryURL == homeDirectory)
-        #expect(command.environment["HOME"] == homeDirectory.path())
+        #expect(command.environment["HOME"] == homeDirectory.path(percentEncoded: false))
         #expect(command.environment["DISABLE_TELEMETRY"] == "1")
         #expect(command.environment["DO_NOT_TRACK"] == "1")
         #expect(command.environment["SECRET_TOKEN"] == nil)
         #expect(result == installedURL)
+    }
+
+    @Test("Filesystem and process paths remain unencoded", .bug(id: 24))
+    func nativePathsRemainUnencoded() async throws {
+        let temporaryDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let homeDirectory = temporaryDirectory.appending(
+            path: "Account #50% With Spaces",
+            directoryHint: .isDirectory
+        )
+        try FileManager.default.createDirectory(
+            at: homeDirectory,
+            withIntermediateDirectories: true
+        )
+        let source = try makeSource(agent: .codex, homeDirectory: homeDirectory)
+        let installedURL = source.directoryURL.appending(
+            path: "swift-testing-pro",
+            directoryHint: .isDirectory
+        )
+        let npxExecutableURL = homeDirectory.appending(
+            path: "Node Tools #1/bin/npx",
+            directoryHint: .notDirectory
+        )
+        let runner = RecordingCommandRunner { _ in
+            try Self.writeManifest(in: installedURL)
+        }
+        let manager = SkillsCLIManager(
+            homeDirectory: homeDirectory,
+            runner: runner,
+            npxExecutableURL: npxExecutableURL,
+            parentEnvironment: ["PATH": "/usr/bin:/bin"]
+        )
+
+        let result = try await manager.install(makeCatalogSkill(), into: source)
+        let command = try #require(await runner.commands.first)
+
+        #expect(command.environment["HOME"] == homeDirectory.path(percentEncoded: false))
+        #expect(
+            command.environment["CODEX_HOME"]
+                == homeDirectory.appending(
+                    path: ".agents",
+                    directoryHint: .isDirectory
+                ).path(percentEncoded: false)
+        )
+        #expect(
+            command.environment["PATH"]?.split(separator: ":").first
+                == Substring(
+                    npxExecutableURL.deletingLastPathComponent().path(percentEncoded: false)
+                )
+        )
+        #expect(result == installedURL)
+    }
+
+    @Test("npx discovery accepts an unencoded executable path", .bug(id: 24))
+    func npxDiscoveryUsesNativePaths() throws {
+        let temporaryDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let executableDirectory = temporaryDirectory.appending(
+            path: "Node Tools #1%",
+            directoryHint: .isDirectory
+        )
+        try FileManager.default.createDirectory(
+            at: executableDirectory,
+            withIntermediateDirectories: true
+        )
+        let npxExecutableURL = executableDirectory.appending(
+            path: "npx",
+            directoryHint: .notDirectory
+        )
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: npxExecutableURL)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: npxExecutableURL.path(percentEncoded: false)
+        )
+
+        let result = SkillsCLIManager.locateNpx(
+            homeDirectory: temporaryDirectory,
+            environment: [
+                "PATH": executableDirectory.path(percentEncoded: false)
+            ]
+        )
+
+        #expect(result == npxExecutableURL)
+    }
+
+    @Test("Remove verifies an unencoded skill directory path", .bug(id: 24))
+    func removePostconditionUsesNativePaths() async throws {
+        let temporaryDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let homeDirectory = temporaryDirectory.appending(
+            path: "Account #50% With Spaces",
+            directoryHint: .isDirectory
+        )
+        try FileManager.default.createDirectory(
+            at: homeDirectory,
+            withIntermediateDirectories: true
+        )
+        let source = try makeSource(agent: .claudeCode, homeDirectory: homeDirectory)
+        let skill = try makeInstalledSkill(in: source)
+        let runner = RecordingCommandRunner()
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        await #expect(throws: SkillsCLIError.expectedDirectoryPresent(skill.directoryURL)) {
+            try await manager.remove(skill, from: source)
+        }
     }
 
     @Test("Codex installs target the shared agents directory")
@@ -84,7 +192,7 @@ struct SkillsCLIManagerTests {
                 == homeDirectory.appending(
                     path: ".agents",
                     directoryHint: .isDirectory
-                ).path()
+                ).path(percentEncoded: false)
         )
         #expect(
             command.arguments.suffix(5)
@@ -148,7 +256,11 @@ struct SkillsCLIManagerTests {
                 "github-copilot",
                 "--yes",
             ])
-        #expect(FileManager.default.fileExists(atPath: skill.directoryURL.path()) == false)
+        #expect(
+            FileManager.default.fileExists(
+                atPath: skill.directoryURL.path(percentEncoded: false)
+            ) == false
+        )
     }
 
     @Test("Custom directories remain discoverable but cannot be mutated")

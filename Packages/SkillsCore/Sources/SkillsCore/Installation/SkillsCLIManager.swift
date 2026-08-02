@@ -318,7 +318,7 @@ public actor SkillsCLIManager: SkillManaging {
 
         var environment = sanitizedEnvironment(npxExecutableURL: npxExecutableURL)
         if let codexHomeDirectory = target.codexHomeDirectory {
-            environment["CODEX_HOME"] = codexHomeDirectory.path()
+            environment["CODEX_HOME"] = codexHomeDirectory.path(percentEncoded: false)
         }
 
         try await runner.run(
@@ -333,7 +333,7 @@ public actor SkillsCLIManager: SkillManaging {
 
     private func sanitizedEnvironment(npxExecutableURL: URL) -> [String: String] {
         var environment: [String: String] = [
-            "HOME": homeDirectory.path(),
+            "HOME": homeDirectory.path(percentEncoded: false),
             "DISABLE_TELEMETRY": "1",
             "DO_NOT_TRACK": "1",
             "NO_COLOR": "1",
@@ -347,7 +347,9 @@ public actor SkillsCLIManager: SkillManaging {
             environment[key] = parentEnvironment[key]
         }
 
-        let executableDirectory = npxExecutableURL.deletingLastPathComponent().path()
+        let executableDirectory = npxExecutableURL.deletingLastPathComponent().path(
+            percentEncoded: false
+        )
         let inheritedPath = parentEnvironment["PATH"] ?? "/usr/bin:/bin"
         var pathComponents = [executableDirectory]
         pathComponents.append(contentsOf: inheritedPath.split(separator: ":").map(String.init))
@@ -359,10 +361,12 @@ public actor SkillsCLIManager: SkillManaging {
     }
 
     private func pathExists(at url: URL) -> Bool {
-        (try? FileManager.default.attributesOfItem(atPath: url.path())) != nil
+        (try? FileManager.default.attributesOfItem(
+            atPath: url.path(percentEncoded: false)
+        )) != nil
     }
 
-    private static func locateNpx(
+    static func locateNpx(
         homeDirectory: URL,
         environment: [String: String]
     ) -> URL? {
@@ -384,7 +388,9 @@ public actor SkillsCLIManager: SkillManaging {
 
         for directory in candidateDirectories {
             let candidate = directory.appending(path: "npx", directoryHint: .notDirectory)
-            if FileManager.default.isExecutableFile(atPath: candidate.path()) {
+            if FileManager.default.isExecutableFile(
+                atPath: candidate.path(percentEncoded: false)
+            ) {
                 return candidate
             }
         }
