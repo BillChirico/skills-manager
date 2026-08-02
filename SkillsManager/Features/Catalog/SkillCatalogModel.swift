@@ -59,20 +59,17 @@ final class SkillCatalogModel {
     private(set) var installingSkillID: CatalogSkill.ID?
 
     @ObservationIgnored private let catalog: any SkillCatalogSearching
-    @ObservationIgnored private let packageFetcher: any SkillPackageFetching
-    @ObservationIgnored private let packageInstaller: any SkillPackageInstalling
+    @ObservationIgnored private let skillManager: any SkillManaging
     @ObservationIgnored private var hasRequestedTopDownloads = false
     @ObservationIgnored private var activeSearchRequestID: UUID?
     @ObservationIgnored private var topDownloadsTask: Task<Void, Never>?
 
     init(
         catalog: any SkillCatalogSearching,
-        packageFetcher: any SkillPackageFetching,
-        packageInstaller: any SkillPackageInstalling
+        skillManager: any SkillManaging
     ) {
         self.catalog = catalog
-        self.packageFetcher = packageFetcher
-        self.packageInstaller = packageInstaller
+        self.skillManager = skillManager
     }
 
     /// Whether the leaderboard is standing in for search results.
@@ -193,11 +190,10 @@ final class SkillCatalogModel {
         }
     }
 
-    /// Downloads a skill once and copies it into each selected directory.
+    /// Installs a skill into each selected directory through the official skills CLI.
     ///
-    /// The package is fetched a single time no matter how many directories are selected,
-    /// and one directory's failure does not stop the others, so the caller always receives
-    /// an outcome per destination rather than a single thrown error.
+    /// One directory's failure does not stop the others, so the caller always receives an
+    /// outcome per destination rather than a single thrown error.
     ///
     /// - Parameters:
     ///   - skill: The catalog skill to install.
@@ -238,30 +234,12 @@ final class SkillCatalogModel {
             installingSkillID = nil
         }
 
-        let package: SkillPackage
-        do {
-            package = try await packageFetcher.fetchPackage(for: skill)
-        } catch {
-            return destinations.map {
-                InstallOutcome(
-                    sourceID: $0.id,
-                    sourceName: $0.displayName,
-                    installedURL: nil,
-                    errorMessage: error.localizedDescription
-                )
-            }
-        }
-
         var outcomes: [InstallOutcome] = []
         outcomes.reserveCapacity(destinations.count)
 
         for destination in destinations {
             do {
-                let installedURL = try await write(
-                    package,
-                    directoryName: skill.slug,
-                    into: destination.directoryURL
-                )
+                let installedURL = try await skillManager.install(skill, into: destination)
                 outcomes.append(
                     InstallOutcome(
                         sourceID: destination.id,
@@ -287,20 +265,5 @@ final class SkillCatalogModel {
 
     private var trimmedQuery: String {
         query.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func write(
-        _ package: SkillPackage,
-        directoryName: String,
-        into directoryURL: URL
-    ) async throws -> URL {
-        let packageInstaller = packageInstaller
-        return try await Task.detached(priority: .userInitiated) {
-            try packageInstaller.install(
-                package,
-                directoryName: directoryName,
-                into: directoryURL
-            )
-        }.value
     }
 }

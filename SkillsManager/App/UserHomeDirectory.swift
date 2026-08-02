@@ -3,12 +3,9 @@ import Foundation
 
 /// Resolves the signed-in account's home directory.
 ///
-/// `FileManager.homeDirectoryForCurrentUser` reports the sandbox container rather
-/// than the account home, so suggested agent locations and `~` path abbreviation
-/// would both resolve inside the container instead of against the user's real
-/// folders. Reading the account home from the password database stays inside the
-/// sandbox: it yields a path, never access to the files beneath it. Resolution
-/// fails closed when the password database has no usable account-home path.
+/// Resolving this from the password database keeps agent-directory suggestions,
+/// `~` path abbreviation, and the lifecycle CLI on the same account-home path.
+/// Resolution fails closed when the password database has no usable path.
 enum UserHomeDirectory {
     /// The account home directory, resolved once per process when available.
     static let current: URL? = resolve()

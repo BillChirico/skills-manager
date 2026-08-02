@@ -531,6 +531,164 @@ struct SkillLibraryModelTests {
         #expect(model.sources.first?.isEnabled == true)
     }
 
+    @Test("Updating a skill runs the CLI and rescans configured directories")
+    func updateRunsLifecycleAndRescans() async throws {
+        let primarySource = SkillSource(
+            name: "Alpha",
+            directoryURL: URL(filePath: "/skills/alpha"),
+            agent: .claudeCode
+        )
+        let secondarySource = SkillSource(
+            name: "Beta",
+            directoryURL: URL(filePath: "/skills/beta"),
+            agent: .cursor
+        )
+        let skill = makeLifecycleSkill(
+            named: "Primary",
+            identifier: "primary",
+            installedVersion: "1.0.0",
+            availableVersion: "2.0.0",
+            source: primarySource
+        )
+        let secondarySkill = makeLifecycleSkill(
+            named: "Secondary",
+            identifier: "secondary",
+            installedVersion: "1.0.0",
+            availableVersion: "1.0.0",
+            source: secondarySource
+        )
+        let refreshedSkill = makeLifecycleSkill(
+            named: "Primary",
+            identifier: "primary",
+            installedVersion: "2.0.0",
+            availableVersion: nil,
+            source: primarySource
+        )
+        let discoverer = RecordingLifecycleDiscoverer(
+            skillsBySource: [
+                primarySource.id: [refreshedSkill],
+                secondarySource.id: [secondarySkill],
+            ]
+        )
+        let skillManager = RecordingLifecycleManager()
+        let model = SkillLibraryModel(
+            sources: [primarySource, secondarySource],
+            skills: [skill, secondarySkill],
+            discoverer: discoverer,
+            skillManager: skillManager
+        )
+
+        await model.updateSkills([skill.id])
+
+        #expect(await skillManager.updatedSkillIDs == [skill.id])
+        #expect(Set(await discoverer.scannedSourceIDs) == [primarySource.id, secondarySource.id])
+        #expect(model.skills.first { $0.id == skill.id }?.installedVersion == "2.0.0")
+        #expect(model.skills.first { $0.id == skill.id }?.availableVersion == "2.0.0")
+        #expect(model.mutatingSkillIDs.isEmpty)
+        #expect(model.presentedError == nil)
+    }
+
+    @Test("A lifecycle operation exposes busy state until its process completes")
+    func lifecycleBusyState() async throws {
+        let source = SkillSource(
+            name: "Team Skills",
+            directoryURL: URL(filePath: "/skills/team"),
+            agent: .claudeCode
+        )
+        let skill = makeLifecycleSkill(
+            named: "Primary",
+            identifier: "primary",
+            installedVersion: "1.0.0",
+            availableVersion: "2.0.0",
+            source: source
+        )
+        let refreshedSkill = makeLifecycleSkill(
+            named: "Primary",
+            identifier: "primary",
+            installedVersion: "2.0.0",
+            availableVersion: nil,
+            source: source
+        )
+        let skillManager = SuspendingLifecycleManager()
+        let model = SkillLibraryModel(
+            sources: [source],
+            skills: [skill],
+            discoverer: RecordingLifecycleDiscoverer(
+                skillsBySource: [source.id: [refreshedSkill]]
+            ),
+            skillManager: skillManager
+        )
+
+        let update = Task { await model.updateSkills([skill.id]) }
+        await skillManager.waitUntilUpdateStarted()
+
+        #expect(model.isMutating(skill.id))
+
+        await skillManager.resumeUpdate()
+        await update.value
+
+        #expect(model.isMutating(skill.id) == false)
+    }
+
+    @Test("A failed removal stays visible while successful removals disappear")
+    func removalReportsPartialFailure() async throws {
+        let successfulSource = SkillSource(
+            name: "Alpha",
+            directoryURL: URL(filePath: "/skills/alpha"),
+            agent: .claudeCode
+        )
+        let failingSource = SkillSource(
+            name: "Beta",
+            directoryURL: URL(filePath: "/skills/beta"),
+            agent: .cursor
+        )
+        let successfulSkill = makeLifecycleSkill(
+            named: "Successful",
+            identifier: "successful",
+            source: successfulSource
+        )
+        let failingSkill = makeLifecycleSkill(
+            named: "Failing",
+            identifier: "failing",
+            source: failingSource
+        )
+        let skillManager = RecordingLifecycleManager(failingSkillIDs: [failingSkill.id])
+        let model = SkillLibraryModel(
+            sources: [successfulSource, failingSource],
+            skills: [successfulSkill, failingSkill],
+            discoverer: RecordingLifecycleDiscoverer(skillsBySource: [:]),
+            skillManager: skillManager
+        )
+        model.selectedSkillIDs = [successfulSkill.id, failingSkill.id]
+
+        await model.removeSkills(model.selectedSkillIDs)
+
+        #expect(Set(await skillManager.removedSkillIDs) == [successfulSkill.id, failingSkill.id])
+        #expect(model.skills.map(\.id) == [failingSkill.id])
+        #expect(model.selectedSkillIDs == [failingSkill.id])
+        #expect(model.presentedError?.title == "Unable to Remove Failing")
+        #expect(model.presentedError?.message.contains("Permission denied") == true)
+        #expect(model.mutatingSkillIDs.isEmpty)
+    }
+
+    private func makeLifecycleSkill(
+        named name: String,
+        identifier: String,
+        installedVersion: String? = nil,
+        availableVersion: String? = nil,
+        source: SkillSource
+    ) -> AgentSkill {
+        AgentSkill(
+            name: name,
+            summary: "Lifecycle fixture.",
+            installedVersion: installedVersion,
+            availableVersion: availableVersion,
+            directoryURL: source.directoryURL.appending(path: identifier),
+            sourceID: source.id,
+            relativePath: identifier
+        )
+    }
+
     private func makeModel(
         sourceStore: any SkillSourceStore = MemorySourceStore(),
         discoverer: any SkillDiscovering = EmptyDiscoverer()
@@ -675,6 +833,79 @@ private actor FailOnceDiscoverer: SkillDiscovering {
                 sourceID: source.id
             )
         ]
+    }
+}
+
+private actor RecordingLifecycleDiscoverer: SkillDiscovering {
+    private let skillsBySource: [SkillSource.ID: [AgentSkill]]
+    private(set) var scannedSourceIDs: [SkillSource.ID] = []
+
+    init(skillsBySource: [SkillSource.ID: [AgentSkill]]) {
+        self.skillsBySource = skillsBySource
+    }
+
+    func discoverSkills(in source: SkillSource) async throws -> [AgentSkill] {
+        scannedSourceIDs.append(source.id)
+        return skillsBySource[source.id] ?? []
+    }
+}
+
+private actor RecordingLifecycleManager: SkillManaging {
+    struct ManagerError: LocalizedError {
+        var errorDescription: String? { "Permission denied" }
+    }
+
+    private let failingSkillIDs: Set<AgentSkill.ID>
+    private(set) var updatedSkillIDs: [AgentSkill.ID] = []
+    private(set) var removedSkillIDs: [AgentSkill.ID] = []
+
+    init(failingSkillIDs: Set<AgentSkill.ID> = []) {
+        self.failingSkillIDs = failingSkillIDs
+    }
+
+    func install(_ skill: CatalogSkill, into source: SkillSource) async throws -> URL {
+        source.directoryURL.appending(path: skill.slug, directoryHint: .isDirectory)
+    }
+
+    func update(_ skill: AgentSkill, in source: SkillSource) async throws {
+        updatedSkillIDs.append(skill.id)
+        if failingSkillIDs.contains(skill.id) {
+            throw ManagerError()
+        }
+    }
+
+    func remove(_ skill: AgentSkill, from source: SkillSource) async throws {
+        removedSkillIDs.append(skill.id)
+        if failingSkillIDs.contains(skill.id) {
+            throw ManagerError()
+        }
+    }
+}
+
+private actor SuspendingLifecycleManager: SkillManaging {
+    private var updateContinuation: CheckedContinuation<Void, Never>?
+
+    func install(_ skill: CatalogSkill, into source: SkillSource) async throws -> URL {
+        source.directoryURL.appending(path: skill.slug, directoryHint: .isDirectory)
+    }
+
+    func update(_ skill: AgentSkill, in source: SkillSource) async throws {
+        await withCheckedContinuation { continuation in
+            updateContinuation = continuation
+        }
+    }
+
+    func remove(_ skill: AgentSkill, from source: SkillSource) async throws {}
+
+    func waitUntilUpdateStarted() async {
+        while updateContinuation == nil {
+            await Task.yield()
+        }
+    }
+
+    func resumeUpdate() {
+        updateContinuation?.resume()
+        updateContinuation = nil
     }
 }
 

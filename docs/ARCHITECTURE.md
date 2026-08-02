@@ -1,7 +1,7 @@
 # Architecture
 
-Skills Manager is a small modular macOS application with an intentionally
-simple boundary:
+Skills Manager is a modular native macOS application with a small dependency
+surface:
 
 ```text
 SwiftUI app (SkillsManager)
@@ -9,233 +9,189 @@ SwiftUI app (SkillsManager)
         ▼
 domain package (SkillsCore)
         │
-        ▼
-injected filesystem and persistence adapters
+        ├── skills.sh HTTP catalog
+        ├── local filesystem and JSON persistence
+        └── direct Process invocation of npx skills
 ```
 
-`SkillsCore` must not import SwiftUI or AppKit. This keeps domain behavior
-testable with `swift test`, makes background work easier to isolate, and leaves
-the option to reuse the package in a command-line tool later.
+`SkillsCore` imports neither SwiftUI nor AppKit. Domain behavior is independently
+testable, background operations stay behind protocols, and the package can be
+reused outside the app.
 
 ## App layer
 
-`SkillsManager/App` owns process-level composition and shared observable state.
-`SkillsManager/Features` is organized by user-facing capability. Views may
-depend on `SkillsCore`; they should not perform direct filesystem or network
-work.
+`SkillsManager/App` owns process composition and main-actor observable state.
+`SkillsManager/Features` groups user-facing capabilities. Views do not perform
+network, filesystem, persistence, or process work directly.
 
-UI state is isolated to the main actor. The initial library model coordinates
-source restoration, selection, scoped search, discovery, and mutations. Native
-bookmark creation and security-scoped access live in the app layer because
-those APIs are macOS-specific. The model receives persistence and discovery
-dependencies through protocols rather than reaching for global state. A
-separate catalog model coordinates debounced skills.sh searches and
-installations so network and filesystem work remain independently testable.
-Agent models expose their standard user skill-directory paths.
-`AgentDirectorySuggestion` resolves those paths against the account home and
-keeps only the folders that exist, so the add menu never offers a location the
-user has not created. If account-home resolution fails, it returns no
-suggestions rather than resolving them against the sandbox container.
-`SettingsView` owns folder-add, folder-remove,
-enabled-state, and reconnect presentation, including the suggestion menu,
-explicit list selection, and destructive confirmation. A suggestion adds its
-folder directly through the library model; the picker stays behind one generic
-`Add Folder…` action and behind the sandbox fallback described below. Selection reconciliation preserves a
-valid user selection but never chooses a folder on the user's behalf. The
-library routes its empty states to the Settings scene; contextual relocation
-also remains in the library for unavailable sources. All mutations still pass
-through `SkillLibraryModel`.
+`SkillsManagerApp` creates one `SkillsCLIManager` and injects that same actor into
+the catalog and library models. Sharing the instance ensures catalog installs and
+library updates or removals pass through one serialized mutation boundary.
+
+`SkillLibraryModel` coordinates configured sources, restoration, discovery,
+selection, scoped search, and lifecycle results. Update and remove methods are
+asynchronous, expose per-skill busy state, preserve failed items, and rescan disk
+after successes. `SkillCatalogModel` owns the skills.sh leaderboard, search state,
+and per-destination install outcomes. `SkillCatalogView` rescans each successful
+destination and selects the installed skill.
+
+Settings owns folder add, configuration removal, enablement, relocation, and
+reconnect presentation. `AgentDirectorySuggestion` resolves standard agent paths
+against `UserHomeDirectory` and only offers directories that exist. Folder
+configuration removal remains non-destructive; skill removal is a distinct,
+explicitly destructive CLI action.
 
 ## Domain layer
 
 `Packages/SkillsCore` owns:
 
-- `SkillSource`, a user-configured skill directory;
-- `SkillAgent`, the agent associated with a configured directory, including
-  `global` for the cross-agent `~/.agents/skills` convention that `codex` also
-  reads — the two cases deliberately resolve to one folder, and `addSource`
-  de-duplicates by URL so configuring both selects the same source;
-- `AgentSkill`, a discovered skill with stable source-relative identity;
-- `SkillDiscovering`, with a local `SKILL.md` scanner;
-- `SkillSourceStore`, with an atomic JSON implementation;
-- `SkillLibraryFilter`, which applies smart-group and source scopes;
-- `SkillSearch` and `SkillLibrarySorter`, which provide deterministic relevance
-  ranking and user-selected ordering;
-- `SkillCatalogSearching`, with the skills.sh search and leaderboard client;
-- `CatalogSkillSorter`, which ranks catalog results by download count;
-- `CatalogIdentifier` and `SkillInstallCommand`, which validate remote catalog
-  fields and model the displayed install command;
-- `SkillPackageFetching`, with a GitHub tree and raw-content implementation; and
-- `SkillPackageInstalling`, with a staged filesystem implementation.
+- `SkillSource` and `SkillAgent`, including standard account-home-relative paths;
+- `AgentSkill` and stable source-relative identities;
+- `SkillDiscovering` and the local `SKILL.md` scanner;
+- `SkillSourceStore` and atomic JSON persistence;
+- filtering, search, and deterministic sorters;
+- `SkillCatalogSearching` and the skills.sh client;
+- `CatalogIdentifier` and `SkillInstallCommand` for untrusted catalog fields;
+- `SkillManaging`, the injected install/update/remove boundary; and
+- `SkillsCLIManager`, its actor-backed official-CLI implementation.
 
-Tests use in-memory fakes or temporary directories rather than a developer's
-real skill folders.
+Tests use actors, in-memory fakes, and unique temporary directories. They never
+operate on a developer's real skill folders.
 
-## Remote discovery and installation
+## Catalog discovery
 
-The skills.sh client uses two public endpoints. `/api/search` answers queries of
-at least two characters, and `/api/skills/all-time/{page}` returns the download
-leaderboard a page at a time. The leaderboard omits the `id` the search endpoint
-reports, so the client composes it from `source` and `skillId` and drops any
-entry missing either. Both responses are capped at 8 MiB before JSON decoding.
-The production HTTP loader enforces a caller-supplied byte ceiling while it
-streams the body, so it stops consuming an oversized response before retaining
-the entire payload. Callers retain their own size checks at the decoding
-boundary so custom and test loaders cannot bypass the policy.
+The skills.sh client uses `/api/search` for queries of at least two characters
+and `/api/skills/all-time/{page}` for the download leaderboard. The leaderboard
+omits the `id` returned by search, so the client composes it from `source` and
+`skillId` and drops incomplete entries.
 
-Search results arrive in relevance order, so `CatalogSkillSorter.byDownloads`
-imposes the download ranking the product presents. It is applied in the app's
-catalog model rather than the client, keeping the client a faithful transport and
-the ordering a presentation decision. Ties fall back to name and then identifier
-so repeated responses render identically.
+Both responses have an 8 MiB streaming ceiling before JSON decoding. The
+production loader stops consuming an oversized body rather than checking only
+after `URLSession` buffers it. Callers retain decoding-boundary checks so a test
+or alternate loader cannot bypass the policy.
 
-`SkillCatalogModel` caches the leaderboard for the session and keeps it separate
-from search results, so clearing the search field falls back to the cached list
-instead of an empty screen or a refetch.
+`CatalogSkillSorter.byDownloads` applies the product's download ranking in the
+app model. Ties fall back to name and identifier. Leaderboard and search state
+remain separate, so clearing search returns to the session-cached leaderboard.
 
-For each installation, the GitHub fetcher resolves `HEAD` once to a commit SHA,
-uses that SHA to enumerate the repository tree, and reuses it in every
-`raw.githubusercontent.com` URL. This avoids mixing a tree from one revision
-with files from another when the default branch moves during a download. The
-recursive tree response has an 8 MiB streaming ceiling, and truncated trees are
-rejected.
+## Official CLI lifecycle
 
-Manifest selection is tied to the catalog slug. A nested `SKILL.md` matches only
-when its immediate parent directory has the requested slug. A repository-root
-`SKILL.md` is accepted only when it is the sole manifest in the tree and the
-validated repository name exactly equals the requested slug. A missing or
-mismatched manifest fails closed instead of falling back to an unrelated root
-or nested skill. Once selected, the fetcher downloads only blob entries beneath
-that manifest's directory. A non-GitHub source remains browsable but is not
-installable.
+Node.js 18 or newer and `npx` are runtime requirements. The manager resolves
+`npx` from the inherited `PATH`, common Homebrew and system paths, Volta, mise,
+asdf, nvm, and fnm locations. The resolved executable's directory leads the
+child `PATH` so an `npx` script can find its sibling `node`.
 
-Before writing, the installer validates the directory name and each path,
-rejects traversal, duplicate paths, and missing manifests, and refuses to
-overwrite an existing skill. Packages are limited to 200 files and 10 MiB,
-assembled in memory, written to a staging directory, then moved into place. The
-fetcher passes the remaining aggregate budget as the ceiling for each raw-file
-stream, so an oversized first file or a later file that would cross 10 MiB is
-stopped before the excess response is buffered. This prevents a failed download
-or validation pass from leaving a partial installed skill.
+The manager launches `Process` directly. The executable URL and argument vector
+remain separate, and no operation uses a shell. Exact non-interactive forms are:
 
-A skill can be installed into several configured directories at once. The model
-fetches the package a single time and then writes it per destination, returning
-one outcome per directory so a partial failure is reported rather than collapsed
-into a single error. Directories that already contain the skill are excluded from
-the destination set.
+```text
+npx --yes skills add <repository> --skill <slug> --global --agent <agent> --copy --yes
+npx --yes skills update <slug> --global --yes
+npx --yes skills remove <slug> --global --agent <agent> --yes
+```
 
-## Untrusted catalog input
+Supported mappings are:
 
-Every field on `CatalogSkill` comes from skills.sh. `CatalogIdentifier` gates
-each one before it becomes a URL path component or a command argument: values are
-restricted to `[A-Za-z0-9._-]`, length-capped, and rejected when they are empty,
-`.`, or `..`. The argument rule additionally rejects a leading `-`, because a slug
-such as `--force` would otherwise be read as an option. The installation-directory
-rule also rejects any leading dot so the scanner cannot lose a newly installed
-hidden skill; safe repository path components such as `.github` remain valid. A
-value that fails install validation leaves the skill browsable but not installable;
-there is no unvalidated fallback. The catalog model re-checks installability before
-it downloads anything, and the filesystem installer independently refuses a hidden
-destination directory. These checks also keep a source like `../evil` from steering
-an `api.github.com` or `raw.githubusercontent.com` request off its path.
+| App source | Standard directory | CLI agent | Additional environment |
+| --- | --- | --- | --- |
+| Global | `~/.agents/skills` | `codex` | `CODEX_HOME=~/.agents` |
+| Codex | `~/.agents/skills` | `codex` | `CODEX_HOME=~/.agents` |
+| Claude Code | `~/.claude/skills` | `claude-code` | — |
+| Cursor | `~/.cursor/skills` | `cursor` | — |
+| GitHub Copilot | `~/.copilot/skills` | `github-copilot` | — |
+| Gemini | `~/.gemini/skills` | `gemini-cli` | — |
 
-Repository tree paths get the same treatment: `GitHubSkillPackageFetcher` drops
-any entry with an empty, `.`, or `..` component before it reaches a raw-content
-URL, so the fetch side is protected as well as the write side.
+Before launch, the configured URL must exactly match the selected agent's
+standard directory. Installed skills must be direct children of that directory,
+and their directory names must pass catalog argument validation. Custom sources
+remain discoverable and readable but lifecycle changes return an actionable
+unsupported-source error. If the account home cannot be resolved, lifecycle
+operations fail closed before resolving `npx` or launching a process.
 
-Installed manifests are untrusted presentation input too. The library overview
-renders the extracted `SKILL.md` text without active link attributes, so a
-Markdown destination cannot turn arbitrary schemes into clickable app chrome.
-Intentional navigation remains a separate, validated UI action rather than an
-attribute supplied by the manifest.
+The child environment is an allowlist: account home, a constructed executable
+path, locale and temporary-directory settings, telemetry opt-outs, and npm
+non-interactive settings. Unrelated variables and secrets are not forwarded.
+Standard input, output, and error use the null device. A nonzero status becomes a
+typed error without exposing unbounded CLI output.
 
-`SkillInstallCommand` models the `npx skills add …` line that skills.sh prints at
-the top of a skill page. It is rebuilt locally from validated fields rather than
-scraped, and it is stored as a program plus an argument vector, not an
-interpolated string. Skills Manager displays and copies that command; it never
-runs it. Installing natively performs the same work — the same files over HTTPS,
-copied into user-granted directories — without handing execution to arbitrary
-remote npm code and without writing outside the sandbox's user-selected grants.
-That install-time boundary does not make a third-party skill inert forever:
-`SKILL.md` is instructions that a configured agent may later follow with that
-agent's own permissions, so the product directs users to review it before use.
-Streaming ceilings bound resource use, and a pinned commit makes one package
-fetch internally consistent; neither control authenticates the publisher or
-establishes that the instructions are trustworthy.
+After a zero status, the manager verifies a filesystem postcondition. Install and
+update require the expected `SKILL.md`; remove requires the directory to be
+absent, including a remaining symbolic-link entry. A private FIFO operation gate
+prevents actor reentrancy while the process runner is awaited, so lock-file
+mutations cannot overlap.
 
-## Platform and visual policy
+## Lifecycle state and partial success
 
-The deployment target is macOS 15. Liquid Glass is used through availability
-checks on macOS 26 and newer; earlier systems receive a semantic material
-fallback. New visual treatments must remain legible with increased contrast,
-reduced transparency, and reduced motion. The app does not define a global
-accent-color asset or root tint, so native SwiftUI and AppKit controls inherit
-the user's current macOS accent color.
+One selected destination or skill is one outcome. Catalog installation continues
+after a destination failure. Library update and removal likewise continue after
+an individual failure and present a concise combined error.
 
-The library window titles itself after the selected scope and subtitles itself
-with the count in view, so the title bar reports state instead of repeating the
-app name. Toolbar actions form two groups separated by a `ToolbarSpacer`:
-prominent discovery and icon-only Settings utilities, then the sort and search
-controls that change how the library is displayed. Settings is also available
-through the app menu and `Command-,`. `SkillsCore` still owns no AppKit, but
-`Shared/VisualStyle/ToolbarSearchFieldWidth.swift` bridges to
-`NSSearchToolbarItem` because SwiftUI exposes no way to stop a toolbar search
-field from growing wider than every action beside it. Prefer a native SwiftUI
-API and add a bridge like this only when none exists.
+Update rescans every enabled, available source after any success because the
+official CLI can reconcile shared state across agents. Removal immediately drops
+only successful IDs, then rescans sources that share the affected directory.
+Failed removals stay visible and selected. Views disable conflicting actions and
+show progress while IDs are in `mutatingSkillIDs`.
 
-Discover mirrors that split: the result list is a static ranked list on semantic
-list styling, while the install-command block uses a semantic control background
-with a separator stroke rather than Liquid Glass, since it is a static container.
-Directory selection is a checkbox list so several destinations can be chosen at
-once. Discover chooses one initial directory so the install action is immediately
-reachable, while still allowing the user to explicitly deselect every directory.
+## Trust boundaries
 
-Settings uses a grouped native `Form` and a resizable minimum/ideal frame. Its
-static folder list uses semantic control and separator colors; Liquid Glass is
-reserved for interactive controls on macOS 26. Healthy rows omit decorative
-status icons. Paused, scanning, and missing states use readable text, and row
-toggles remain distinct accessibility elements. Since macOS folds a secondary
-button into a selectable list row, unavailable rows also expose Reconnect as a
-source-specific named accessibility action on the row Toggle.
+Every `CatalogSkill` field is remote input. `CatalogIdentifier` restricts URL
+components and process arguments to `[A-Za-z0-9._-]`, caps length, rejects empty
+and relative-path segments, and rejects leading options. Installation directory
+names also reject a leading dot so discovery cannot lose a newly installed
+hidden skill. Invalid results remain browsable but are not installable, with no
+unvalidated fallback.
 
-The app sandbox permits outbound network access, user-selected read/write
-access, and app-scoped bookmarks. A sandboxed process therefore cannot read an
-arbitrary folder under the account home until the user confirms it, so adding a
-suggested location succeeds only where access already exists. `SettingsView`
-treats `SourceAccessError.accessDenied` from that path as "consent still
-required" and opens the picker at the suggestion instead of reporting an error;
-every other failure is reported. `UserHomeDirectory` supplies the account home
-that suggestions and `~` abbreviation resolve against, because
-`FileManager.homeDirectoryForCurrentUser` reports the sandbox container. The
-password-database lookup is fallible; when it fails, home-based suggestions and
-picker defaults disappear and persisted source paths remain un-abbreviated.
+`SkillInstallCommand` reconstructs the command displayed by skills.sh from
+validated fields. The app may copy it or use its split argument vector as the
+validated base of a lifecycle invocation; it never evaluates the display string.
 
-Directory grants are stored as security-scoped bookmarks, resolved on launch,
-and held only while their source remains configured. Failed resolution is surfaced as an unavailable source
-instead of an empty library. A URL returned by the directory picker must be
-opened with `startAccessingSecurityScopedResource()` before bookmark creation;
-add and relocation operations release that access and roll back state if
-bookmarking or persistence fails. Because `sources.json` carries those bookmark
-blobs and the full map of configured directories, it is written owner-only
-(`0600`) inside an owner-only directory rather than inheriting the process
-umask, which matters for unsigned builds that run outside an app container.
+Installed manifests are untrusted presentation input. The library strips link
+attributes from Markdown-derived overview text, so a manifest cannot create an
+interactive destination in app chrome. Separately constructed external links
+must remain validated HTTPS actions.
 
-Source mutations that roll back after a failed save re-resolve their target by
-`SkillSource.ID`, never by an index captured before the `await`. `sources` is
-main-actor isolated, but awaiting a save yields the actor, so a concurrent
-mutation can reorder or shrink the array before the rollback runs.
+Direct arguments and a scrubbed environment prevent shell injection and secret
+leakage; they do not authenticate npm or skill publishers. `npx` can download and
+execute the npm-hosted `skills` package, and that CLI installs community content.
+The UI and README disclose this boundary and direct users to review `SKILL.md`.
+
+## Platform, filesystem, and visual policy
+
+The deployment target is macOS 15. Liquid Glass is availability-gated to macOS
+26 and newer; earlier releases receive semantic material fallbacks. The app has
+no global accent-color asset or root tint, so native controls inherit the user's
+accent color.
+
+Skills Manager intentionally ships with `ENABLE_APP_SANDBOX=NO`. An external
+Node/npm child needs executable, network, and standard-agent-directory access,
+and it would inherit an App Sandbox that dynamic picker grants cannot reliably
+broaden. Reintroducing App Sandbox requires a separately designed and reviewed
+helper boundary.
+
+Configured source URLs are persisted in `sources.json` under Application Support.
+The JSON store creates an owner-only directory and file (`0700`/`0600`). Existing
+legacy bookmark data may still decode, but production composition no longer
+creates or relies on security-scoped bookmarks. Rollbacks re-resolve sources by
+stable `SkillSource.ID` after every `await`, never by a possibly stale array index.
+
+The library title reports the selected scope and item count. Toolbar actions keep
+discovery and Settings separate from sort/search controls. Static content uses
+semantic backgrounds; Liquid Glass is reserved for interactive controls. Busy,
+paused, scanning, and unavailable states use accessible text or labels rather
+than color alone.
 
 ## Project generation
 
-`project.yml` is authoritative. `SkillsManager.xcodeproj` is generated and
-committed for easy onboarding. Any target, build-setting, capability, or file
-layout change should update the specification first and regenerate the project
-with `make generate`.
+`project.yml` is authoritative and `SkillsManager.xcodeproj` is committed for
+onboarding. Do not hand-edit `project.pbxproj`. Change the specification, run
+`make generate`, and commit the regenerated project.
 
 ## Planned extension points
 
-1. Define authoritative on-disk update, remove, and conflict-resolution
-   semantics behind an injected mutation protocol.
-2. Add authenticated or alternate registry adapters without coupling them to
-   app state.
-3. Add UI automation with XCTest after the mutation workflows stabilize.
+1. Add bounded, privacy-reviewed diagnostics for CLI failures without logging
+   process environments or skill contents.
+2. Evaluate a signed helper/XPC architecture if App Sandbox becomes a product
+   requirement.
+3. Add authenticated or alternate registry adapters behind existing protocols.
+4. Add UI automation with XCTest for destructive confirmation and partial-failure
+   workflows.

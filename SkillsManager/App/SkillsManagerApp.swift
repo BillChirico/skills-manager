@@ -7,6 +7,7 @@ struct SkillsManagerApp: App {
     @State private var catalogModel: SkillCatalogModel
 
     init() {
+        let skillsCLIManager = SkillsCLIManager(homeDirectory: UserHomeDirectory.current)
         let sourceStore: (any SkillSourceStore)? =
             FileManager.default.urls(
                 for: .applicationSupportDirectory,
@@ -24,15 +25,13 @@ struct SkillsManagerApp: App {
             initialValue: SkillLibraryModel(
                 sourceStore: sourceStore,
                 discoverer: FileSystemSkillDiscoverer(),
-                bookmarker: SecurityScopedSkillSourceBookmarker(),
-                sourceAccess: SecurityScopedSkillSourceAccess()
+                skillManager: skillsCLIManager
             )
         )
         _catalogModel = State(
             initialValue: SkillCatalogModel(
                 catalog: SkillsShCatalogClient(),
-                packageFetcher: GitHubSkillPackageFetcher(),
-                packageInstaller: FileSystemSkillPackageInstaller()
+                skillManager: skillsCLIManager
             )
         )
     }

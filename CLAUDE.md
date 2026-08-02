@@ -11,5 +11,7 @@ At a glance:
 - `Packages/SkillsCore/` is the UI-independent domain package.
 - `make test` runs package tests.
 - `make check` is the preferred pre-handoff validation when Xcode is installed.
-- Remote content is untrusted; preserve the bounded-streaming, exact-manifest,
-  commit-pinning, and non-clickable-overview rules in `AGENTS.md`.
+- Node.js 18 or newer and `npx` are runtime requirements for lifecycle actions.
+- Remote content is untrusted; preserve the validated shell-free CLI boundary,
+  scrubbed child environment, postcondition checks, bounded catalog responses,
+  and non-clickable overview rules in `AGENTS.md`.

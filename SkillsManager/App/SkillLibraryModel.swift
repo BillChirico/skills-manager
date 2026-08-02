@@ -25,6 +25,25 @@ final class SkillLibraryModel {
         }
     }
 
+    private enum LifecycleError: LocalizedError {
+        case unavailable
+        case sourceMissing
+
+        var errorDescription: String? {
+            switch self {
+            case .unavailable:
+                "Skill lifecycle operations are unavailable."
+            case .sourceMissing:
+                "The skill's configured directory could not be found."
+            }
+        }
+    }
+
+    private struct LifecycleFailure {
+        let name: String
+        let message: String
+    }
+
     private(set) var sources: [SkillSource]
     private(set) var skills: [AgentSkill]
     private(set) var sourceStates: [SkillSource.ID: SourceState]
@@ -39,11 +58,13 @@ final class SkillLibraryModel {
     var searchText = ""
     var sortOrder: SkillSortOrder
     var presentedError: PresentedError?
+    private(set) var mutatingSkillIDs: Set<AgentSkill.ID> = []
 
     @ObservationIgnored private let sourceStore: (any SkillSourceStore)?
     @ObservationIgnored private let discoverer: (any SkillDiscovering)?
     @ObservationIgnored private let bookmarker: (any SkillSourceBookmarking)?
     @ObservationIgnored private let sourceAccess: (any SkillSourceAccessing)?
+    @ObservationIgnored private let skillManager: (any SkillManaging)?
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private var hasRestoredSources = false
 
@@ -54,6 +75,7 @@ final class SkillLibraryModel {
         discoverer: (any SkillDiscovering)? = nil,
         bookmarker: (any SkillSourceBookmarking)? = nil,
         sourceAccess: (any SkillSourceAccessing)? = nil,
+        skillManager: (any SkillManaging)? = nil,
         sortOrder: SkillSortOrder = .name,
         now: @escaping () -> Date = { .now }
     ) {
@@ -64,6 +86,7 @@ final class SkillLibraryModel {
         self.discoverer = discoverer
         self.bookmarker = bookmarker
         self.sourceAccess = sourceAccess
+        self.skillManager = skillManager
         self.now = now
         self.sourceStates = Dictionary(
             uniqueKeysWithValues: sortedSources.map { ($0.id, .available) }
@@ -457,13 +480,58 @@ final class SkillLibraryModel {
         }
     }
 
-    func updateSkills(_ skillIDs: Set<AgentSkill.ID>) {
-        for index in skills.indices where skillIDs.contains(skills[index].id) {
-            guard let availableVersion = skills[index].availableVersion else {
+    func isMutating(_ skillID: AgentSkill.ID) -> Bool {
+        mutatingSkillIDs.contains(skillID)
+    }
+
+    func updateSkills(_ skillIDs: Set<AgentSkill.ID>) async {
+        let selectedSkills = skills.filter {
+            skillIDs.contains($0.id)
+                && $0.hasUpdate
+                && mutatingSkillIDs.contains($0.id) == false
+        }
+        guard selectedSkills.isEmpty == false else {
+            return
+        }
+
+        mutatingSkillIDs.formUnion(selectedSkills.map(\.id))
+        defer {
+            mutatingSkillIDs.subtract(selectedSkills.map(\.id))
+        }
+
+        var failures: [LifecycleFailure] = []
+        var didUpdate = false
+
+        for skill in selectedSkills {
+            guard let skillManager else {
+                failures.append(failure(for: skill, error: LifecycleError.unavailable))
                 continue
             }
-            skills[index].installedVersion = availableVersion
+            guard let source = source(for: skill.sourceID) else {
+                failures.append(failure(for: skill, error: LifecycleError.sourceMissing))
+                continue
+            }
+
+            do {
+                try await skillManager.update(skill, in: source)
+                didUpdate = true
+            } catch {
+                failures.append(failure(for: skill, error: error))
+            }
         }
+
+        if didUpdate {
+            let sourceIDs = Set(
+                sources
+                    .filter {
+                        $0.isEnabled && sourceState(for: $0.id) == .available
+                    }
+                    .map(\.id)
+            )
+            failures.append(contentsOf: await rescanSources(sourceIDs))
+        }
+
+        presentLifecycleFailures(failures, action: "Update", pastParticiple: "Updated")
     }
 
     func setSkillsEnabled(_ isEnabled: Bool, skillIDs: Set<AgentSkill.ID>) {
@@ -472,9 +540,57 @@ final class SkillLibraryModel {
         }
     }
 
-    func removeSkills(_ skillIDs: Set<AgentSkill.ID>) {
-        skills.removeAll { skillIDs.contains($0.id) }
-        selectedSkillIDs.subtract(skillIDs)
+    func removeSkills(_ skillIDs: Set<AgentSkill.ID>) async {
+        let selectedSkills = skills.filter {
+            skillIDs.contains($0.id) && mutatingSkillIDs.contains($0.id) == false
+        }
+        guard selectedSkills.isEmpty == false else {
+            return
+        }
+
+        mutatingSkillIDs.formUnion(selectedSkills.map(\.id))
+        defer {
+            mutatingSkillIDs.subtract(selectedSkills.map(\.id))
+        }
+
+        var failures: [LifecycleFailure] = []
+        var removedSkillIDs: Set<AgentSkill.ID> = []
+        var affectedDirectoryURLs: Set<URL> = []
+
+        for skill in selectedSkills {
+            guard let skillManager else {
+                failures.append(failure(for: skill, error: LifecycleError.unavailable))
+                continue
+            }
+            guard let source = source(for: skill.sourceID) else {
+                failures.append(failure(for: skill, error: LifecycleError.sourceMissing))
+                continue
+            }
+
+            do {
+                try await skillManager.remove(skill, from: source)
+                removedSkillIDs.insert(skill.id)
+                affectedDirectoryURLs.insert(source.directoryURL.standardizedFileURL)
+            } catch {
+                failures.append(failure(for: skill, error: error))
+            }
+        }
+
+        if removedSkillIDs.isEmpty == false {
+            skills.removeAll { removedSkillIDs.contains($0.id) }
+            selectedSkillIDs.subtract(removedSkillIDs)
+
+            let sourceIDs = Set(
+                sources
+                    .filter {
+                        affectedDirectoryURLs.contains($0.directoryURL.standardizedFileURL)
+                    }
+                    .map(\.id)
+            )
+            failures.append(contentsOf: await rescanSources(sourceIDs))
+        }
+
+        presentLifecycleFailures(failures, action: "Remove", pastParticiple: "Removed")
     }
 
     func selectSkill(at directoryURL: URL, sourceID: SkillSource.ID) {
@@ -496,6 +612,53 @@ final class SkillLibraryModel {
             title: title,
             message: error.localizedDescription
         )
+    }
+
+    private func failure(for skill: AgentSkill, error: any Error) -> LifecycleFailure {
+        LifecycleFailure(name: skill.name, message: error.localizedDescription)
+    }
+
+    private func rescanSources(_ sourceIDs: Set<SkillSource.ID>) async -> [LifecycleFailure] {
+        var failures: [LifecycleFailure] = []
+
+        for sourceID in sourceIDs {
+            guard let source = source(for: sourceID) else {
+                continue
+            }
+
+            do {
+                try await rescanSource(sourceID)
+            } catch {
+                failures.append(
+                    LifecycleFailure(
+                        name: source.displayName,
+                        message: "The directory could not be rescanned: \(error.localizedDescription)"
+                    )
+                )
+            }
+        }
+
+        return failures
+    }
+
+    private func presentLifecycleFailures(
+        _ failures: [LifecycleFailure],
+        action: String,
+        pastParticiple: String
+    ) {
+        guard failures.isEmpty == false else {
+            return
+        }
+
+        let title =
+            failures.count == 1
+            ? "Unable to \(action) \(failures[0].name)"
+            : "Some Skills Could Not Be \(pastParticiple)"
+        let message =
+            failures
+            .map { "\($0.name): \($0.message)" }
+            .joined(separator: "\n")
+        presentedError = PresentedError(title: title, message: message)
     }
 
     private var recentCutoff: Date {

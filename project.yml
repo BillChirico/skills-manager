@@ -30,7 +30,6 @@ fileGroups:
   - AGENTS.md
   - CLAUDE.md
   - docs
-  - SkillsManager/Support
 
 targets:
   SkillsManager:
@@ -47,10 +46,9 @@ targets:
         product: SkillsCore
     settings:
       base:
-        CODE_SIGN_ENTITLEMENTS: SkillsManager/Support/SkillsManager.entitlements
         CODE_SIGN_STYLE: Automatic
         CURRENT_PROJECT_VERSION: 1
-        ENABLE_APP_SANDBOX: YES
+        ENABLE_APP_SANDBOX: NO
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Skills Manager
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
