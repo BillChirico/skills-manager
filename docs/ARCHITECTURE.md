@@ -31,8 +31,13 @@ library updates or removals pass through one serialized mutation boundary.
 `SkillLibraryModel` coordinates configured sources, restoration, discovery,
 selection, scoped search, and lifecycle results. Update and remove methods are
 asynchronous, expose per-skill busy state, preserve failed items, and rescan disk
-after successes. `SkillCatalogModel` owns the skills.sh leaderboard, search state,
-and per-destination install outcomes. `SkillCatalogView` rescans each successful
+after successes. Restoration also detects every supported agent's standard
+directory that already exists under the account home, merges new candidates
+with persisted sources and their durable removal exclusions, and persists the
+merged configuration atomically before scanning; see
+[Automatic agent-folder detection](#automatic-agent-folder-detection).
+`SkillCatalogModel` owns the skills.sh leaderboard, search state, and
+per-destination install outcomes. `SkillCatalogView` rescans each successful
 destination and selects the installed skill.
 
 Settings owns folder add, configuration removal, enablement, relocation, and
@@ -48,7 +53,8 @@ explicitly destructive CLI action.
 - `SkillSource` and `SkillAgent`, including standard account-home-relative paths;
 - `AgentSkill` and stable source-relative identities;
 - `SkillDiscovering` and the local `SKILL.md` scanner;
-- `SkillSourceStore` and atomic JSON persistence;
+- `SkillSourceStore` and atomic JSON persistence of the combined source and
+  automatic-folder-exclusion configuration, including legacy-array decoding;
 - filtering, search, and deterministic sorters;
 - `SkillCatalogSearching` and the skills.sh client;
 - `CatalogIdentifier` and `SkillInstallCommand` for untrusted catalog fields;
@@ -57,6 +63,34 @@ explicitly destructive CLI action.
 
 Tests use actors, in-memory fakes, and unique temporary directories. They never
 operate on a developer's real skill folders.
+
+## Automatic agent-folder detection
+
+`SkillLibraryModel.restoreSources()` runs once per model instance. After
+restoring persisted sources and resolving legacy bookmarks, it derives standard
+candidate directories from `SkillAgent.allCases` against the injected account
+home, keeping only candidates the injected `directoryExists` closure reports as
+real directories and not already covered by a persisted source or a durable
+exclusion. Global and Codex both resolve to `~/.agents/skills`; de-duplicating
+by standardized URL keeps the first `SkillAgent.allCases` match, so the folder
+is assigned to Global. New automatic sources are appended, sorted, and
+persisted before the model scans them, without moving the current sidebar
+selection.
+
+Removing a source whose directory matches a standard location adds that
+normalized URL to `excludedAutomaticDirectoryURLs` in the same atomic save that
+removes the source, so the folder stays out of the library across later
+launches. Removing a custom folder never creates an exclusion. Manually adding
+a still-existing standard location — through the picker or the Settings
+suggestion menu — clears its exclusion in the same save that (re)adds the
+source. Restoring configuration also reconciles the exclusion set against
+currently configured sources, dropping any exclusion whose URL is already
+configured, so a manually edited or inconsistent file self-repairs.
+
+Tests inject `homeDirectory` and `directoryExists` with deterministic fakes;
+production composition supplies `UserHomeDirectory.current` and a real
+filesystem check. No automatic-detection test reads a developer's actual home
+directory.
 
 ## Catalog discovery
 
@@ -207,11 +241,15 @@ retains code-signing and runtime integrity protections that are compatible with
 the external process design. Reintroducing App Sandbox requires a separately
 designed and reviewed helper boundary.
 
-Configured source URLs are persisted in `sources.json` under Application Support.
-The JSON store creates an owner-only directory and file (`0700`/`0600`). Existing
-legacy bookmark data may still decode, but production composition no longer
-creates or relies on security-scoped bookmarks. Rollbacks re-resolve sources by
-stable `SkillSource.ID` after every `await`, never by a possibly stale array index.
+Configured source URLs and durable automatic-folder exclusions are persisted
+together as one `SkillSourceConfiguration` document in `sources.json` under
+Application Support, written atomically so a source removal and its exclusion
+land in the same write. The JSON store creates an owner-only directory and file
+(`0700`/`0600`) and still decodes a legacy top-level source array into an empty
+exclusion set. Existing legacy bookmark data may still decode, but production
+composition no longer creates or relies on security-scoped bookmarks. Rollbacks
+re-resolve sources by stable `SkillSource.ID` after every `await`, never by a
+possibly stale array index.
 
 The library title reports the selected scope and item count. Toolbar actions keep
 discovery and Settings separate from sort/search controls. Static content uses

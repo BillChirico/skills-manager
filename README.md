@@ -8,6 +8,10 @@ The current product surface includes:
 - a SwiftUI three-column library with smart groups, scoped search, multi-select,
   detail tabs, and recovery-focused empty states;
 - persistent user-selected skill directories;
+- automatic startup detection of every supported agent's standard skills
+  directory that already exists under the account home, with a durable
+  removal that persists across relaunches until the folder is manually added
+  back;
 - one-click suggested locations for the shared `~/.agents/skills` folder, Claude
   Code, Codex, Cursor, Gemini, and GitHub Copilot, listed only while the folder
   exists, plus a picker for any other directory;
@@ -160,6 +164,14 @@ instructions safe. Review the installed manifest before an agent uses it.
 
 ## Directory access
 
+On launch, Skills Manager automatically configures every supported agent's
+standard skills directory that already exists under the signed-in account
+home — `~/.agents/skills` (Global), `~/.claude/skills` (Claude Code), and the
+rest — with no action required. Removing one of these folders persists a
+durable exclusion so it stays out of the library across later launches;
+manually adding that same standard path — through the picker or the Settings
+suggestion menu — clears the exclusion and configures it again.
+
 Settings lists every configured skill folder. Its plus menu suggests each
 supported agent’s standard user location — `Global — ~/.agents/skills`,
 `Claude Code — ~/.claude/skills`, and the rest — and lists a suggestion only
@@ -180,8 +192,9 @@ home directory, Skills Manager suppresses home-based suggestions and picker
 defaults instead of guessing, and lifecycle operations fail before launching a
 process.
 
-The app stores configured directory URLs in its application-support data and
-ships without App Sandbox so the official CLI can perform lifecycle operations.
+The app stores configured directory URLs and folder-removal exclusions
+together in one atomic application-support document and ships without App
+Sandbox so the official CLI can perform lifecycle operations.
 Settings opens without selecting a folder on the user's behalf. Each row can
 pause or resume scanning, unavailable rows can reconnect through the system
 picker, and paths under the home directory are abbreviated with `~`. Selecting a
