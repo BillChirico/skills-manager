@@ -33,8 +33,9 @@ selection, scoped search, and lifecycle results. Update and remove methods are
 asynchronous, expose per-skill busy state, preserve failed items, and rescan disk
 after successes. Restoration also detects every supported agent's standard
 directory that already exists under the account home, merges new candidates
-with persisted sources and their durable removal exclusions, and persists the
-merged configuration atomically before scanning; see
+with persisted sources and their durable removal exclusions, publishes the
+reconciled configuration in memory, and attempts an atomic normalization save
+without making scanning depend on that save succeeding; see
 [Automatic agent-folder detection](#automatic-agent-folder-detection).
 `SkillCatalogModel` owns the skills.sh leaderboard, search state, and
 per-destination install outcomes. `SkillCatalogView` rescans each successful
@@ -69,23 +70,29 @@ operate on a developer's real skill folders.
 `SkillLibraryModel.restoreSources()` runs once per model instance. After
 restoring persisted sources and resolving legacy bookmarks, it derives standard
 candidate directories from `SkillAgent.allCases` against the injected account
-home, keeping only candidates the injected `directoryExists` closure reports as
-real directories and not already covered by a persisted source or a durable
-exclusion. Global and Codex both resolve to `~/.agents/skills`; de-duplicating
-by standardized URL keeps the first `SkillAgent.allCases` match, so the folder
-is assigned to Global. New automatic sources are appended, sorted, and
-persisted before the model scans them, without moving the current sidebar
-selection.
+home. Source identity uses a canonical directory key that resolves symbolic
+links, standardizes the path, and applies directory semantics while preserving
+each source's user-selected URL for display and access. Persisted aliases with
+the same key are coalesced on load, keeping the first source. Only candidates the
+injected `directoryExists` closure reports as existing directories and whose key
+is not already covered by a persisted source or durable exclusion are added.
+Global and Codex both resolve to `~/.agents/skills`; canonical de-duplication
+keeps the first `SkillAgent.allCases` match, so the folder is assigned to Global.
 
 Removing a source whose directory matches a standard location adds that
-normalized URL to `excludedAutomaticDirectoryURLs` in the same atomic save that
-removes the source, so the folder stays out of the library across later
-launches. Removing a custom folder never creates an exclusion. Manually adding
-a still-existing standard location — through the picker or the Settings
-suggestion menu — clears its exclusion in the same save that (re)adds the
-source. Restoring configuration also reconciles the exclusion set against
-currently configured sources, dropping any exclusion whose URL is already
-configured, so a manually edited or inconsistent file self-repairs.
+canonical directory key to `excludedAutomaticDirectoryURLs` in the same atomic
+save that removes the source, so the folder stays out of the library across
+later launches even when another path aliases it. Removing a custom folder never
+creates an exclusion. Manually adding the same physical standard directory —
+through the picker or the Settings suggestion menu — clears its exclusion in the
+same save that (re)adds the source. Restoration canonicalizes persisted
+exclusions and drops any exclusion represented by a configured source.
+
+The restored, coalesced sources and reconciled exclusions are published in
+memory before their normalization save is attempted. A failed save is reported
+without discarding those sources or preventing their scans. Any later successful
+source mutation persists the complete in-memory configuration. Automatic
+sources are appended and sorted without moving the current sidebar selection.
 
 Tests inject `homeDirectory` and `directoryExists` with deterministic fakes;
 production composition supplies `UserHomeDirectory.current` and a real

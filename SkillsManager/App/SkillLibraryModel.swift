@@ -232,55 +232,73 @@ final class SkillLibraryModel {
 
             do {
                 let configuration = try await sourceStore.loadConfiguration()
-                var restoredSources = configuration.sources
+                var restoredSources: [SkillSource] = []
                 var restoredSourceStates: [SkillSource.ID: SourceState] = [:]
+                var restoredSourceIDs: Set<SkillSource.ID> = []
+                var configuredDirectoryKeys: Set<URL> = []
                 var didRefreshBookmark = false
 
-                for index in restoredSources.indices {
-                    let sourceID = restoredSources[index].id
-                    restoredSourceStates[sourceID] = .available
-
-                    guard
-                        let bookmarkData = restoredSources[index].bookmarkData,
-                        let bookmarker
-                    else {
+                for persistedSource in configuration.sources {
+                    let sourceID = persistedSource.id
+                    guard restoredSourceIDs.insert(sourceID).inserted else {
                         continue
                     }
 
-                    do {
-                        let resolved = try bookmarker.resolveBookmark(bookmarkData)
-                        restoredSources[index].directoryURL = resolved.url
+                    var restoredSource = persistedSource
+                    var restoredSourceState = SourceState.available
 
-                        if sourceAccess?.beginAccessing(resolved.url, for: sourceID) == false {
-                            restoredSourceStates[sourceID] = .unavailable
-                        }
+                    if let bookmarkData = restoredSource.bookmarkData,
+                        let bookmarker
+                    {
+                        do {
+                            let resolved = try bookmarker.resolveBookmark(bookmarkData)
+                            restoredSource.directoryURL = resolved.url
 
-                        if resolved.isStale {
-                            restoredSources[index].bookmarkData =
-                                try bookmarker.makeBookmark(for: resolved.url)
-                            didRefreshBookmark = true
+                            if sourceAccess?.beginAccessing(resolved.url, for: sourceID) == false {
+                                restoredSourceState = .unavailable
+                            }
+
+                            if resolved.isStale {
+                                restoredSource.bookmarkData =
+                                    try bookmarker.makeBookmark(for: resolved.url)
+                                didRefreshBookmark = true
+                            }
+                        } catch {
+                            restoredSourceState = .unavailable
                         }
-                    } catch {
-                        restoredSourceStates[sourceID] = .unavailable
                     }
+
+                    let directoryKey = canonicalDirectoryURL(
+                        for: restoredSource.directoryURL
+                    )
+                    guard configuredDirectoryKeys.insert(directoryKey).inserted else {
+                        sourceAccess?.stopAccessing(sourceID: sourceID)
+                        continue
+                    }
+
+                    restoredSources.append(restoredSource)
+                    restoredSourceStates[sourceID] = restoredSourceState
                 }
 
-                let configuredDirectoryURLs = Set(
-                    restoredSources.map { $0.directoryURL.standardizedFileURL }
-                )
+                let didReconcileSources =
+                    restoredSources.count != configuration.sources.count
                 let normalizedExclusions = Set(
-                    configuration.excludedAutomaticDirectoryURLs.map(\.standardizedFileURL)
+                    configuration.excludedAutomaticDirectoryURLs.map {
+                        canonicalDirectoryURL(for: $0)
+                    }
                 )
                 let reconciledExclusions = normalizedExclusions.subtracting(
-                    configuredDirectoryURLs
+                    configuredDirectoryKeys
                 )
-                var mergedDirectoryURLs = configuredDirectoryURLs
+                var mergedDirectoryKeys = configuredDirectoryKeys
                 let automaticSources = automaticSourceCandidates().filter { candidate in
-                    let directoryURL = candidate.directoryURL.standardizedFileURL
-                    guard reconciledExclusions.contains(directoryURL) == false else {
+                    let directoryKey = canonicalDirectoryURL(
+                        for: candidate.directoryURL
+                    )
+                    guard reconciledExclusions.contains(directoryKey) == false else {
                         return false
                     }
-                    return mergedDirectoryURLs.insert(directoryURL).inserted
+                    return mergedDirectoryKeys.insert(directoryKey).inserted
                 }
 
                 restoredSources.append(contentsOf: automaticSources)
@@ -293,25 +311,32 @@ final class SkillLibraryModel {
                     reconciledExclusions
                     != configuration.excludedAutomaticDirectoryURLs
 
-                if didRefreshBookmark
-                    || automaticSources.isEmpty == false
-                    || didReconcileExclusions
-                {
-                    try await sourceStore.save(
-                        SkillSourceConfiguration(
-                            sources: sortedRestoredSources,
-                            excludedAutomaticDirectoryURLs: reconciledExclusions
-                        )
-                    )
-                }
-
                 sources = sortedRestoredSources
                 sourceStates = restoredSourceStates
                 excludedAutomaticDirectoryURLs = reconciledExclusions
 
-                return sources.filter {
+                let restoredSourcesToScan = sources.filter {
                     $0.isEnabled && sourceState(for: $0.id) == .available
                 }
+
+                if didRefreshBookmark
+                    || automaticSources.isEmpty == false
+                    || didReconcileSources
+                    || didReconcileExclusions
+                {
+                    do {
+                        try await sourceStore.save(
+                            SkillSourceConfiguration(
+                                sources: sortedRestoredSources,
+                                excludedAutomaticDirectoryURLs: reconciledExclusions
+                            )
+                        )
+                    } catch {
+                        report(error, title: "Unable to Save Directories")
+                    }
+                }
+
+                return restoredSourcesToScan
             } catch {
                 report(error, title: "Unable to Restore Directories")
                 return []
@@ -335,18 +360,19 @@ final class SkillLibraryModel {
         agent: SkillAgent = .other
     ) async throws {
         let normalizedURL = directoryURL.standardizedFileURL
+        let directoryKey = canonicalDirectoryURL(for: normalizedURL)
         let sourceToScan: SkillSource? = try await withSerializedSourceMutation {
             if let existingSource = sources.first(where: {
-                $0.directoryURL.standardizedFileURL == normalizedURL
+                canonicalDirectoryURL(for: $0.directoryURL) == directoryKey
             }) {
                 let previousSidebarSelection = sidebarSelection
                 sidebarSelection = .source(existingSource.id)
 
-                if excludedAutomaticDirectoryURLs.remove(normalizedURL) != nil {
+                if excludedAutomaticDirectoryURLs.remove(directoryKey) != nil {
                     do {
                         try await persistSources()
                     } catch {
-                        excludedAutomaticDirectoryURLs.insert(normalizedURL)
+                        excludedAutomaticDirectoryURLs.insert(directoryKey)
                         sidebarSelection = previousSidebarSelection
                         throw error
                     }
@@ -379,7 +405,7 @@ final class SkillLibraryModel {
 
             let previousExcludedAutomaticDirectoryURLs =
                 excludedAutomaticDirectoryURLs
-            excludedAutomaticDirectoryURLs.remove(normalizedURL)
+            excludedAutomaticDirectoryURLs.remove(directoryKey)
             sources.append(source)
             sources = Self.sortedSources(sources)
             sourceStates[source.id] = .available
@@ -520,11 +546,13 @@ final class SkillLibraryModel {
             let previousSidebarSelection = sidebarSelection
             let didChangeSidebar = previousSidebarSelection == .source(sourceID)
 
-            let removedDirectoryURL = removedSource.directoryURL.standardizedFileURL
+            let removedDirectoryKey = canonicalDirectoryURL(
+                for: removedSource.directoryURL
+            )
             var insertedAutomaticExclusion: URL?
-            if standardSourceDirectoryURLs.contains(removedDirectoryURL) {
-                if excludedAutomaticDirectoryURLs.insert(removedDirectoryURL).inserted {
-                    insertedAutomaticExclusion = removedDirectoryURL
+            if standardSourceDirectoryKeys.contains(removedDirectoryKey) {
+                if excludedAutomaticDirectoryURLs.insert(removedDirectoryKey).inserted {
+                    insertedAutomaticExclusion = removedDirectoryKey
                 }
             }
 
@@ -882,12 +910,14 @@ final class SkillLibraryModel {
     }
 
     private func automaticSourceCandidates() -> [SkillSource] {
-        var discoveredDirectoryURLs: Set<URL> = []
+        var discoveredDirectoryKeys: Set<URL> = []
 
         return standardSourceCandidates().filter { source in
             let directoryURL = source.directoryURL.standardizedFileURL
             return directoryExists(directoryURL)
-                && discoveredDirectoryURLs.insert(directoryURL).inserted
+                && discoveredDirectoryKeys.insert(
+                    canonicalDirectoryURL(for: directoryURL)
+                ).inserted
         }
     }
 
@@ -910,12 +940,22 @@ final class SkillLibraryModel {
         }
     }
 
-    private var standardSourceDirectoryURLs: Set<URL> {
+    private var standardSourceDirectoryKeys: Set<URL> {
         Set(
             standardSourceCandidates().map {
-                $0.directoryURL.standardizedFileURL
+                canonicalDirectoryURL(for: $0.directoryURL)
             }
         )
+    }
+
+    /// A stable physical-path identity used only for source equality and exclusions.
+    /// Source URLs themselves remain in the form the user selected for display and access.
+    private func canonicalDirectoryURL(for directoryURL: URL) -> URL {
+        let resolvedURL = directoryURL.resolvingSymlinksInPath()
+        return URL(
+            filePath: resolvedURL.path(percentEncoded: false),
+            directoryHint: .isDirectory
+        ).standardizedFileURL
     }
 
     private func recoverSource(

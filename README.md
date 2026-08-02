@@ -169,8 +169,11 @@ standard skills directory that already exists under the signed-in account
 home — `~/.agents/skills` (Global), `~/.claude/skills` (Claude Code), and the
 rest — with no action required. Removing one of these folders persists a
 durable exclusion so it stays out of the library across later launches;
-manually adding that same standard path — through the picker or the Settings
-suggestion menu — clears the exclusion and configures it again.
+manually adding the same physical directory — through the picker, a path alias,
+or the Settings suggestion menu — clears the exclusion and configures it again.
+Symlink-resolved path aliases share one canonical identity for source
+de-duplication and automatic-folder exclusions while the selected path remains
+the one shown and accessed by the app.
 
 Settings lists every configured skill folder. Its plus menu suggests each
 supported agent’s standard user location — `Global — ~/.agents/skills`,

@@ -291,6 +291,36 @@ struct SkillLibraryModelTests {
         #expect(source == persistedSource)
     }
 
+    @Test("Restoring coalesces persisted paths that alias one physical folder")
+    func restoreCoalescesPersistedPathAliases() async throws {
+        let fixture = try makeSymlinkedClaudeDirectory()
+        defer { try? FileManager.default.removeItem(at: fixture.rootDirectory) }
+
+        let selectedSource = SkillSource(
+            name: "Dotfiles Claude Skills",
+            directoryURL: fixture.aliasDirectory,
+            agent: .claudeCode
+        )
+        let duplicateSource = SkillSource(
+            name: "Standard Claude Skills",
+            directoryURL: fixture.standardDirectory,
+            agent: .claudeCode
+        )
+        let store = MemorySourceStore(sources: [selectedSource, duplicateSource])
+        let model = makeModel(
+            sourceStore: store,
+            homeDirectory: fixture.homeDirectory,
+            directoryExists: {
+                $0.standardizedFileURL == fixture.standardDirectory.standardizedFileURL
+            }
+        )
+
+        await model.restoreSources()
+
+        #expect(model.sources == [selectedSource])
+        #expect(await store.loadConfiguration().sources == [selectedSource])
+    }
+
     @Test("A persisted folder clears a stale automatic-folder exclusion")
     func restoreReconcilesExclusionForPersistedFolder() async throws {
         let homeDirectory = URL(
@@ -313,7 +343,9 @@ struct SkillLibraryModelTests {
         let model = makeModel(
             sourceStore: store,
             homeDirectory: homeDirectory,
-            directoryExists: { _ in true }
+            directoryExists: {
+                $0.standardizedFileURL == claudeDirectory.standardizedFileURL
+            }
         )
 
         await model.restoreSources()
@@ -325,17 +357,29 @@ struct SkillLibraryModelTests {
         )
     }
 
-    @Test("A failed automatic-folder save does not publish the new folder")
-    func failedRestoreSaveDoesNotPublishAutomaticFolder() async {
+    @Test("A failed restore save keeps loaded and automatic folders in memory")
+    func failedRestoreSaveKeepsRestoredFoldersInMemory() async throws {
         let homeDirectory = URL(
             filePath: "/Users/reviewer",
+            directoryHint: .isDirectory
+        )
+        let persistedDirectory = URL(
+            filePath: "/skills/team",
             directoryHint: .isDirectory
         )
         let cursorDirectory = URL(
             filePath: "/Users/reviewer/.cursor/skills",
             directoryHint: .isDirectory
         )
-        let store = FailOnceSourceStore()
+        let addedAfterFailure = URL(
+            filePath: "/skills/added-after-failure",
+            directoryHint: .isDirectory
+        )
+        let persistedSource = SkillSource(
+            name: "Team Skills",
+            directoryURL: persistedDirectory
+        )
+        let store = FailOnceSourceStore(sources: [persistedSource])
         let model = makeModel(
             sourceStore: store,
             homeDirectory: homeDirectory,
@@ -346,9 +390,25 @@ struct SkillLibraryModelTests {
 
         await model.restoreSources()
 
-        #expect(model.sources.isEmpty)
-        #expect(await store.loadConfiguration() == SkillSourceConfiguration())
-        #expect(model.presentedError?.title == "Unable to Restore Directories")
+        #expect(
+            Set(model.sources.map { $0.directoryURL.standardizedFileURL })
+                == Set([persistedDirectory, cursorDirectory])
+        )
+        #expect(
+            await store.loadConfiguration()
+                == SkillSourceConfiguration(sources: [persistedSource])
+        )
+        #expect(model.presentedError?.title == "Unable to Save Directories")
+
+        try await model.addSource(at: addedAfterFailure)
+
+        #expect(
+            Set(
+                await store.loadConfiguration().sources.map {
+                    $0.directoryURL.standardizedFileURL
+                }
+            ) == Set([persistedDirectory, cursorDirectory, addedAfterFailure])
+        )
     }
 
     @Test("An unavailable account home suppresses automatic folder detection")
@@ -710,6 +770,80 @@ struct SkillLibraryModelTests {
         #expect(restoredModel.sources.isEmpty)
     }
 
+    @Test("Removing a path alias durably excludes its automatic folder")
+    func removedPathAliasStaysExcluded() async throws {
+        let fixture = try makeSymlinkedClaudeDirectory()
+        defer { try? FileManager.default.removeItem(at: fixture.rootDirectory) }
+
+        let aliasedSource = SkillSource(
+            name: "Dotfiles Claude Skills",
+            directoryURL: fixture.aliasDirectory,
+            agent: .claudeCode
+        )
+        let store = MemorySourceStore(sources: [aliasedSource])
+        let directoryExists: @Sendable (URL) -> Bool = {
+            $0.standardizedFileURL == fixture.standardDirectory.standardizedFileURL
+        }
+        let firstModel = makeModel(
+            sourceStore: store,
+            homeDirectory: fixture.homeDirectory,
+            directoryExists: directoryExists
+        )
+
+        await firstModel.restoreSources()
+
+        #expect(firstModel.sources == [aliasedSource])
+        try await firstModel.removeSource(aliasedSource.id)
+
+        let savedAfterRemoval = await store.loadConfiguration()
+        #expect(savedAfterRemoval.sources.isEmpty)
+        let savedExclusion = try #require(
+            savedAfterRemoval.excludedAutomaticDirectoryURLs.first
+        )
+        #expect(savedAfterRemoval.excludedAutomaticDirectoryURLs.count == 1)
+        #expect(
+            savedExclusion.pathComponents
+                == fixture.aliasDirectory.pathComponents
+        )
+
+        let restoredModel = makeModel(
+            sourceStore: store,
+            homeDirectory: fixture.homeDirectory,
+            directoryExists: directoryExists
+        )
+        await restoredModel.restoreSources()
+
+        #expect(restoredModel.sources.isEmpty)
+    }
+
+    @Test("Adding a path alias clears its canonical automatic-folder exclusion")
+    func manualAliasAddClearsCanonicalExclusion() async throws {
+        let fixture = try makeSymlinkedClaudeDirectory()
+        defer { try? FileManager.default.removeItem(at: fixture.rootDirectory) }
+
+        let store = MemorySourceStore(
+            excludedAutomaticDirectoryURLs: [fixture.standardDirectory]
+        )
+        let model = makeModel(
+            sourceStore: store,
+            homeDirectory: fixture.homeDirectory,
+            directoryExists: {
+                $0.standardizedFileURL == fixture.standardDirectory.standardizedFileURL
+            }
+        )
+        await model.restoreSources()
+        #expect(model.sources.isEmpty)
+
+        try await model.addSource(
+            at: fixture.aliasDirectory,
+            agent: .claudeCode
+        )
+
+        let savedAfterAdd = await store.loadConfiguration()
+        #expect(savedAfterAdd.sources.first?.directoryURL == fixture.aliasDirectory)
+        #expect(savedAfterAdd.excludedAutomaticDirectoryURLs.isEmpty)
+    }
+
     @Test("Manually adding an excluded standard folder opts it back in")
     func manualAddClearsAutomaticFolderExclusion() async throws {
         let homeDirectory = URL(
@@ -751,7 +885,10 @@ struct SkillLibraryModelTests {
         let restoredSource = try #require(restoredModel.sources.first)
         #expect(restoredModel.sources.count == 1)
         #expect(restoredSource.agent == .gemini)
-        #expect(restoredSource.directoryURL == geminiDirectory)
+        #expect(
+            restoredSource.directoryURL.pathComponents
+                == geminiDirectory.pathComponents
+        )
     }
 
     @Test("A failed manual re-add restores the automatic-folder exclusion")
@@ -1252,6 +1389,56 @@ struct SkillLibraryModelTests {
             directoryURL: source.directoryURL.appending(path: identifier),
             sourceID: source.id,
             relativePath: identifier
+        )
+    }
+
+    private func makeSymlinkedClaudeDirectory() throws -> (
+        rootDirectory: URL,
+        homeDirectory: URL,
+        standardDirectory: URL,
+        aliasDirectory: URL
+    ) {
+        let rootDirectory = URL.temporaryDirectory.appending(
+            path: "SkillLibraryModelTests-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        let homeDirectory = rootDirectory.appending(
+            path: "home",
+            directoryHint: .isDirectory
+        )
+        let dotfilesDirectory = rootDirectory.appending(
+            path: "dotfiles",
+            directoryHint: .isDirectory
+        )
+        let aliasDirectory = dotfilesDirectory.appending(
+            path: "skills",
+            directoryHint: .isDirectory
+        )
+        try FileManager.default.createDirectory(
+            at: homeDirectory,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: aliasDirectory,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createSymbolicLink(
+            at: homeDirectory.appending(
+                path: ".claude",
+                directoryHint: .isDirectory
+            ),
+            withDestinationURL: dotfilesDirectory
+        )
+        let standardDirectory = homeDirectory.appending(
+            path: ".claude/skills",
+            directoryHint: .isDirectory
+        )
+
+        return (
+            rootDirectory: rootDirectory,
+            homeDirectory: homeDirectory,
+            standardDirectory: standardDirectory,
+            aliasDirectory: aliasDirectory
         )
     }
 

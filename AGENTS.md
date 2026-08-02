@@ -63,9 +63,17 @@ hand-off when full Xcode is available. If Xcode is unavailable, run
   under the account home once per launch, in
   `SkillLibraryModel.restoreSources()`. Persist a folder the user removes as a
   durable exclusion so it does not reappear on the next launch, and clear that
-  exclusion only when the same standard path is added back. Inject the account
-  home and a directory-existence closure so tests never touch a developer's
-  real home directory.
+  exclusion only when the same physical directory is added back. Use a
+  symlink-resolved, directory-normalized canonical key for automatic
+  de-duplication and exclusions while preserving the user-selected source URL
+  for display and access. Inject the account home and a directory-existence
+  closure so tests never touch a developer's real home directory.
+- During restoration, coalesce persisted source aliases with the same canonical
+  directory key while preserving the first source, and canonicalize persisted
+  exclusions. Publish the loaded and reconciled configuration in memory before
+  attempting its normalization save. Report a save failure without discarding
+  or withholding scans of restored sources; the next successful source mutation
+  must persist the complete in-memory configuration.
 - Resolve the account home through `UserHomeDirectory`, never
   `FileManager.homeDirectoryForCurrentUser`, so suggestions, display paths, and
   CLI operations use one authoritative location. If account-home resolution
