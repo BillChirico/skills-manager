@@ -84,6 +84,12 @@ full Xcode app. `make build` and the app unit tests require Xcode. Swift sources
 are formatted with the `swift format` command included in the Swift toolchain;
 run `make lint` for a non-mutating style check.
 
+Focused process regressions exercise the real stdout byte ceiling and capture
+cancellation; the cancellation case waits for a child-created readiness marker
+before cancelling. A macOS-only regression also holds an inherited stdout writer
+open to enforce the one-second post-exit drain deadline; the complete macOS check
+remains a required hand-off gate.
+
 ## Catalog browsing and installation
 
 The Discover Skills window opens on the skills.sh all-time download leaderboard,
@@ -116,23 +122,47 @@ and `TMPDIR` redirected into that disposable home. It runs from a separate
 owner-only working directory and captures at most 256 KiB of stdout. The runner
 opens an owner-only output file before launch, drains the child through a bounded
 pipe, and parses those captured bytes without reopening a child-writable path.
-It never receives a path to a real skill installation. After a zero exit, Skills
-Manager accepts only the reviewed text transcript in its expected order: unknown
-controls or lines, unexpected names or sources, duplicate names, failure or
-deletion diagnostics, malformed UTF-8, and inconsistent counts all fail closed.
-Deferred cleanup covers the canonical lock, captured output, working directory,
-and complete disposable home on success, failure, launch error, timeout,
-cancellation, and parse failure.
+The capture task alone owns and closes the pipe's read descriptor. Caller
+cancellation cancels and awaits that task; after the direct process exits, a
+one-second drain deadline cancels it and fails closed if an inherited writer is
+still holding the pipe open. The probe never receives a path to a real skill
+installation. After a zero exit, Skills Manager accepts only the reviewed text
+transcript in its expected order: unknown controls or lines, unexpected names or
+sources, duplicate names, failure or deletion diagnostics, malformed UTF-8, and
+inconsistent counts all fail closed. Deferred cleanup covers the canonical lock,
+captured output, working directory, and complete disposable home on success,
+failure, launch error, timeout, cancellation, and parse failure.
 
-One availability check runs after restored sources finish scanning. A completed
-result is authoritative for matching installation directory names; an error or
-cancellation clears prior positive claims. Skills with confirmed updates form
-the first partition of every name, date-added, or agent sort while preserving
-the selected order within both partitions. Each affected row presents both the
-word `Update` and a download symbol, and its combined accessibility label says
-`Update available`. The Updates Available empty state distinguishes not checked,
-checking, unavailable, and confirmed-current results and offers a safe retry
-when appropriate.
+One availability check runs after restored sources finish scanning. Its
+`SkillUpdateAvailability` result separates exact checked built-in-installation
+URLs from the update-available subset. The version-3 global lock records no
+per-agent destination list, so after the isolated-home probe validates a name,
+the manager projects it into all five deduplicated fixed locations under the
+resolved account home: `.agents/skills` (shared by Global and Codex),
+`.claude/skills`, `.cursor/skills`, `.copilot/skills`, and `.gemini/skills`.
+Neither the lock nor CLI output can supply an arbitrary installation path. The
+model canonicalizes the returned and installed directory URLs and intersects
+them exactly, so a discovered skill at one of those fixed destinations can
+receive status while a same-named custom-path skill remains unknown.
+
+`AgentSkill` records an explicit update status: unknown, current, or available.
+A nil status exists only for pre-probe and legacy decoded data, where version
+comparison remains a compatibility fallback. Once a check starts, unknown is
+explicit and suppresses any stale version-based badge. Only a checked canonical
+URL that maps to one installed skill becomes current or available; empty and
+partial locks, unchecked URLs, and ambiguous duplicate physical identities stay
+unknown. Any unknown installation prevents an all-current claim and produces a
+partial state with a retry. The normalized last successful result is reapplied
+after every successful rescan, preserving covered statuses while making newly
+discovered unchecked skills unknown and downgrading the overall state to partial.
+An error or cancellation clears prior positive claims.
+
+Skills with confirmed updates form the first partition of every name,
+date-added, or agent sort while preserving the selected order within both
+partitions. Each affected row presents both the word `Update` and a download
+symbol, and its combined accessibility label says `Update available`. The
+Updates Available empty state distinguishes not checked, checking, partially
+checked, unavailable, and confirmed-current results.
 
 The actual per-skill update action remains fail-closed. Release 1.5.21 can
 filter an update by skill and global/project scope, but has no `--agent` option;

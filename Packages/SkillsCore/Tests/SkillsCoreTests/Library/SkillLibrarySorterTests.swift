@@ -16,7 +16,7 @@ struct SkillLibrarySorterTests {
                 name: "Zulu Update",
                 source: codex,
                 addedAt: Date(timeIntervalSince1970: 1),
-                isUpdateAvailable: true
+                updateStatus: .available
             ),
             makeSkill(
                 name: "Beta Current",
@@ -143,12 +143,12 @@ struct SkillLibrarySorterTests {
         name: String,
         source: SkillSource,
         addedAt: Date,
-        isUpdateAvailable: Bool? = nil
+        updateStatus: SkillUpdateStatus? = nil
     ) -> AgentSkill {
         AgentSkill(
             name: name,
             summary: "\(name) summary",
-            isUpdateAvailable: isUpdateAvailable,
+            updateStatus: updateStatus,
             directoryURL: source.directoryURL.appending(path: name),
             sourceID: source.id,
             addedAt: addedAt

@@ -38,7 +38,9 @@ new candidates with persisted sources and their durable removal exclusions,
 publishes the reconciled configuration in memory, and attempts an atomic
 normalization save without making scanning depend on that save succeeding. Once
 all restored-source scans finish, the model performs one serialized availability
-check and applies its authoritative name set in one main-actor update; see
+check. It receives exact checked built-in-directory URL identities separately
+from the update-available subset, canonicalizes them, and applies authoritative
+state only to unique installed-URL matches in one main-actor update; see
 [Automatic agent-folder detection](#automatic-agent-folder-detection) and
 [Update availability isolation](#update-availability-isolation).
 `SkillCatalogModel` owns the skills.sh leaderboard, search state, and
@@ -186,14 +188,21 @@ under the disposable home and receives no explicit real skill path. This is
 process configuration, not a filesystem sandbox; the security document records
 the remaining ambient-access risk.
 
-The process runner opens the owner-only stdout file before launch, drains the
-child through a nonblocking, cancellation-aware pipe while it executes, and
+The process runner opens the owner-only stdout file before launch and gives one
+detached capture task sole ownership of reading and closing the pipe's
+nonblocking read descriptor. That task drains while the child executes and
 enforces a 256 KiB ceiling; crossing it requests termination and fails closed.
-Standard input and error remain disconnected. After a zero exit, the runner
-persists through that already-open handle and returns the same bounded bytes, so
-the parser never reopens a pathname the child could replace. The manager requires
-UTF-8, removes only the exact ANSI sequences present in the reviewed transcript,
-and then accepts in order either:
+No other task closes the reader, avoiding a descriptor-reuse race. Caller
+cancellation cancels and awaits the capture task. After the direct process exits,
+the runner allows one second for the pipe to reach EOF, then cancels and awaits
+the capture task and fails closed if an inherited descendant writer kept it open.
+Standard input and error remain disconnected.
+
+After a zero exit and successful drain, the runner persists through the
+already-open output handle and returns the same bounded bytes, so the parser
+never reopens a pathname the child could replace. The manager requires UTF-8,
+removes only the exact ANSI sequences present in the reviewed transcript, and
+then accepts in order either:
 
 - one header, every expected lock source exactly once, and the all-current line;
   or
@@ -202,11 +211,33 @@ and then accepts in order either:
 
 Any unknown terminal control or line, unexpected or duplicate source/name,
 failure/skip/deletion diagnostic, inconsistent count, or partial transcript is
-an error; raw output is neither logged nor presented. The returned value is only
-the validated set of installation directory names. Deferred cleanup covers the
-captured output, working directory, canonical lock, and complete disposable home
-after success, launch failure, nonzero exit, timeout, cancellation, and parse
-failure. An empty validated lock returns an empty set without launching `npx`.
+an error; raw output is neither logged nor presented. The public
+`SkillUpdateAvailability` result carries URL identities, not bare names. For each
+validated lock key produced by the isolated-home probe, the manager constructs
+file URLs under five deduplicated fixed account-home destinations:
+`.agents/skills` (shared by Global and Codex), `.claude/skills`,
+`.cursor/skills`, `.copilot/skills`, and `.gemini/skills`. This projection is
+necessary because the version-3 global lock can represent
+`--global --agent ... --copy` installs but records no per-agent destination
+list. The manager returns the complete projection as
+`checkedSkillDirectoryURLs` and maps the parser's subset through the same fixed
+set as `updateAvailableSkillDirectoryURLs`; neither lock metadata nor transcript
+text can choose a custom directory. The model then resolves symlinks,
+standardizes directory semantics, rechecks the subset relationship, and
+intersects those identities with installations actually discovered at the same
+canonical URLs before storing the normalized result. An empty validated lock
+returns both sets empty without launching `npx`; it does not assert that
+installed skills are current.
+Deferred cleanup covers the captured output, working directory, canonical lock,
+and complete disposable home after success, launch failure, nonzero exit,
+timeout, cancellation, and parse failure.
+
+Focused real-process regressions exercise successful bounded capture, the actual
+stdout ceiling, capture-task cancellation, and child replacement of the output
+pathname. The cancellation regression waits for a child-created readiness marker
+instead of assuming a fixed delay means the subprocess launched. A macOS-only
+regression covers the requirement that an inherited writer cannot hold the drain
+open beyond the one-second deadline.
 
 Supported mappings are:
 
@@ -265,17 +296,35 @@ One selected destination or skill is one outcome. Catalog installation continues
 after a destination failure. Library update and removal likewise continue after
 an individual failure and present a concise combined error.
 
-`AgentSkill.isUpdateAvailable` is optional so previously encoded values remain
-compatible. When non-nil it is authoritative; installed/available version
-comparison is only the legacy fallback before a check has supplied a detection.
+`AgentSkill.updateStatus` uses the explicit `SkillUpdateStatus` values
+`.unknown`, `.current`, and `.available`. The property remains optional only so
+pre-probe and previously encoded values can use installed/available version
+comparison as a compatibility fallback. Once a probe starts, the model assigns
+explicit `.unknown`; `hasUpdate` then returns false even when stale legacy
+version fields differ. Only `.available` produces an update badge.
+
 After restoration finishes scanning every enabled source,
-`SkillLibraryModel.refreshUpdateAvailability()` marks the check as running and
-clears earlier positive detections before awaiting `SkillManaging`. A successful
-set is applied to every skill whose installation directory name matches, in one
-main-actor pass, and the state becomes current. A cancellation returns to idle;
-every other error leaves detections non-positive, marks availability unavailable,
-and uses the existing safe alert path. A later source rescan preserves the last
-authoritative detection.
+`SkillLibraryModel.refreshUpdateAvailability()` marks the check as running,
+clears the stored last result, and sets every skill to `.unknown` before awaiting
+`SkillManaging`. It normalizes the returned file URLs to symlink-resolved,
+standardized directory identities, requires the update set to remain a subset of
+the checked set, stores the normalized result, and groups installed skills by the
+same canonical URL. A checked URL with exactly one installed match becomes
+`.available` when it is in the update subset and `.current` otherwise. A
+discovered built-in agent installation can therefore receive status, while a
+custom-path installation with the same final directory name has a different URL
+and remains `.unknown`; multiple model entries for one canonical physical URL
+are likewise ambiguous and remain unknown.
+
+The state becomes current only when every installed skill received one of those
+unique authoritative URL matches; otherwise a successful probe is partial. This
+prevents an empty or incomplete lock from producing “All Skills Are Up to Date.”
+After every successful source rescan, the model reapplies the normalized last
+result across the complete replacement skill list. Existing covered skills keep
+their current/available status, while a newly discovered unchecked skill becomes
+unknown and immediately downgrades current to partial. A cancellation returns to
+idle; every other error leaves statuses unknown, marks availability unavailable,
+and uses the existing safe alert path.
 
 `SkillLibrarySorter` treats `hasUpdate` as an invariant first key. The user's
 name, newest-date, or agent/source selection remains the secondary order inside
@@ -283,8 +332,9 @@ the update and current partitions; relative path and then source ID provide the
 stable final tie breakers. An update row shows the text `Update` with a filled
 download symbol and includes `Update available` in its combined accessibility
 label, so the state does not depend on color. The Updates Available empty state
-distinguishes idle, checking, current, and unavailable results and offers a
-manual retry for idle or unavailable state.
+distinguishes idle, checking, partial, current, and unavailable results. The
+partial state explains that some skills remain unknown and offers a manual retry,
+as do idle and unavailable states.
 
 The production manager currently returns an explicit failure for every update,
 so the model reports the upstream limitation and does not rescan on that path.

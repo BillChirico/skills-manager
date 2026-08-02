@@ -6,10 +6,24 @@ import Foundation
     import Glibc
 #endif
 
+/// The fixed global-scope installation directories covered by one authoritative probe.
+public struct SkillUpdateAvailability: Equatable, Sendable {
+    public let checkedSkillDirectoryURLs: Set<URL>
+    public let updateAvailableSkillDirectoryURLs: Set<URL>
+
+    public init(
+        checkedSkillDirectoryURLs: Set<URL>,
+        updateAvailableSkillDirectoryURLs: Set<URL>
+    ) {
+        self.checkedSkillDirectoryURLs = checkedSkillDirectoryURLs
+        self.updateAvailableSkillDirectoryURLs = updateAvailableSkillDirectoryURLs
+    }
+}
+
 /// Performs supported skill lifecycle mutations through the official `skills` CLI.
 public protocol SkillManaging: Sendable {
-    /// Returns installation directory names whose global lock entries have changed upstream.
-    func checkForUpdates() async throws -> Set<String>
+    /// Returns separately identified checked and update-available global installations.
+    func checkForUpdates() async throws -> SkillUpdateAvailability
 
     /// Installs a catalog skill into a configured source and returns its directory.
     func install(_ skill: CatalogSkill, into source: SkillSource) async throws -> URL
@@ -23,7 +37,7 @@ public protocol SkillManaging: Sendable {
 
 public extension SkillManaging {
     /// Test and alternate managers that do not provide remote update discovery opt out safely.
-    func checkForUpdates() async throws -> Set<String> {
+    func checkForUpdates() async throws -> SkillUpdateAvailability {
         throw SkillsCLIError.updateCheckLockInvalid
     }
 }
@@ -102,35 +116,69 @@ struct FoundationProcessCommandRunner: ProcessCommandRunning {
         do {
             try await execution.run()
             if let outputCapture, let captureTask {
-                let data = try await withThrowingTaskGroup(of: Data.self) { group in
-                    group.addTask {
-                        try await captureTask.value
-                    }
-                    group.addTask {
-                        try await Task.sleep(for: .seconds(1))
-                        outputCapture.cancel()
-                        throw SkillsCLIError.updateCheckOutputInvalid
-                    }
+                let result = await withTaskCancellationHandler {
+                    await withTaskGroup(of: OutputCaptureWaitResult.self) { group in
+                        group.addTask {
+                            do {
+                                return .captured(try await captureTask.value)
+                            } catch let error as SkillsCLIError {
+                                return .failed(error)
+                            } catch {
+                                return .stopped
+                            }
+                        }
+                        group.addTask {
+                            do {
+                                try await Task.sleep(for: .seconds(1))
+                            } catch {
+                                return .stopped
+                            }
+                            captureTask.cancel()
+                            return .stopped
+                        }
 
-                    guard let firstResult = try await group.next() else {
-                        throw SkillsCLIError.updateCheckOutputInvalid
+                        let firstResult = await group.next() ?? .stopped
+                        group.cancelAll()
+                        return firstResult
                     }
-                    group.cancelAll()
-                    return firstResult
+                } onCancel: {
+                    captureTask.cancel()
+                }
+
+                if Task.isCancelled {
+                    throw SkillsCLIError.commandCancelled
+                }
+                let data: Data
+                switch result {
+                case .captured(let capturedData):
+                    data = capturedData
+                case .failed(let error):
+                    throw error
+                case .stopped:
+                    if Task.isCancelled {
+                        throw SkillsCLIError.commandCancelled
+                    }
+                    throw SkillsCLIError.updateCheckOutputInvalid
                 }
                 try outputCapture.persist(data)
                 return data
             }
             return nil
         } catch {
-            outputCapture?.cancel()
             if let captureTask {
                 captureTask.cancel()
                 _ = await captureTask.result
             }
+            outputCapture?.discardOutputFile()
             throw error
         }
     }
+}
+
+private enum OutputCaptureWaitResult: Sendable {
+    case captured(Data)
+    case failed(SkillsCLIError)
+    case stopped
 }
 
 private final class BoundedProcessOutputCapture: @unchecked Sendable {
@@ -150,6 +198,8 @@ private final class BoundedProcessOutputCapture: @unchecked Sendable {
         self.outputFile = try FileHandle(forWritingTo: outputURL)
     }
 
+    /// Owns the pipe's read end for its complete lifetime. Callers cancel this
+    /// task and await it; no other task may close or reuse the descriptor.
     func collect(execution: ProcessExecution) async throws -> Data {
         defer { try? pipe.fileHandleForReading.close() }
         let descriptor = pipe.fileHandleForReading.fileDescriptor
@@ -219,8 +269,7 @@ private final class BoundedProcessOutputCapture: @unchecked Sendable {
         }
     }
 
-    func cancel() {
-        try? pipe.fileHandleForReading.close()
+    func discardOutputFile() {
         try? outputFile.close()
     }
 }
@@ -649,7 +698,7 @@ public actor SkillsCLIManager: SkillManaging {
         self.initializationError = nil
     }
 
-    public func checkForUpdates() async throws -> Set<String> {
+    public func checkForUpdates() async throws -> SkillUpdateAvailability {
         await beginOperation()
         defer { finishOperation() }
 
@@ -659,8 +708,12 @@ public actor SkillsCLIManager: SkillManaging {
         try Task.checkCancellation()
 
         let lock = try validatedUpdateLock()
+        let checkedSkillDirectoryNames = Set(lock.skills.keys)
         guard lock.skills.isEmpty == false else {
-            return []
+            return SkillUpdateAvailability(
+                checkedSkillDirectoryURLs: [],
+                updateAvailableSkillDirectoryURLs: []
+            )
         }
         guard let npxExecutableURL else {
             throw SkillsCLIError.npxNotFound
@@ -731,10 +784,40 @@ public actor SkillsCLIManager: SkillManaging {
         )
 
         let boundedOutput = try boundedUpdateOutput(output)
-        return try Self.parseUpdateOutput(
+        let updateAvailableSkillDirectoryNames = try Self.parseUpdateOutput(
             boundedOutput,
-            expectedSkillNames: Set(lock.skills.keys),
+            expectedSkillNames: checkedSkillDirectoryNames,
             expectedSources: Set(lock.skills.values.map(\.source))
+        )
+        let checkedSkillDirectoryURLs = updateDirectoryURLs(
+            for: checkedSkillDirectoryNames
+        )
+        let updateAvailableSkillDirectoryURLs = updateDirectoryURLs(
+            for: updateAvailableSkillDirectoryNames
+        )
+        return SkillUpdateAvailability(
+            checkedSkillDirectoryURLs: checkedSkillDirectoryURLs,
+            updateAvailableSkillDirectoryURLs: updateAvailableSkillDirectoryURLs
+        )
+    }
+
+    /// A global lock key can represent one or more `--global --agent ... --copy`
+    /// destinations, but version 3 stores no per-agent list. Project validated
+    /// keys only into the app's fixed built-in destinations; model reconciliation
+    /// intersects these identities with installations actually discovered there.
+    private func updateDirectoryURLs(for skillNames: Set<String>) -> Set<URL> {
+        let supportedDirectories = Set(
+            SkillAgent.allCases.compactMap {
+                $0.defaultSkillsDirectory(in: homeDirectory)
+            }
+        )
+
+        return Set(
+            skillNames.flatMap { skillName in
+                supportedDirectories.map {
+                    $0.appending(path: skillName, directoryHint: .isDirectory)
+                }
+            }
         )
     }
 

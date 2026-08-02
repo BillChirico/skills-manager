@@ -109,9 +109,13 @@ forwarded. The reviewed upstream path is directed into the disposable tree and
 receives no explicit path to a real skill installation; this process
 configuration is containment, not a filesystem sandbox. Standard input and
 error remain disconnected. The runner opens the owner-only stdout file before
-launch, drains the process through a nonblocking, cancellation-aware pipe, and
-caps it at 256 KiB; exceeding the cap stops the direct process and produces no
-availability result.
+launch and gives one capture task sole ownership of reading and closing the
+pipe's nonblocking read descriptor. It caps the stream at 256 KiB; exceeding the
+cap stops the direct process and produces no availability result. No competing
+task closes that descriptor. Caller cancellation cancels and awaits the capture
+task. After direct-process exit, the runner allows one second for EOF, then
+cancels and awaits the capture task and fails closed if an inherited descendant
+writer still holds the pipe open.
 
 After a zero exit, the runner persists through the already-open file handle and
 returns those same bounded bytes. The parser never reopens the child-writable
@@ -123,17 +127,30 @@ or consistent positive
 found/update/summary counts with matching `Updating` and `Updated` lines. Unknown
 terminal controls or lines, unexpected or duplicate names and sources,
 failure/skip/deletion diagnostics, partial results, and any count mismatch fail
-closed. Returned names must already exist in the validated lock. Raw lock data
-and raw CLI output are never logged or presented.
+closed. The result never exposes bare names as installation identity. The
+version-3 global lock can represent `--global --agent ... --copy` installs but
+records no per-agent destination list. The manager therefore maps every
+validated checked lock key into all five deduplicated fixed destinations under
+the resolved account home: `.agents/skills` (shared by Global and Codex),
+`.claude/skills`, `.cursor/skills`, `.copilot/skills`, and `.gemini/skills`, and
+maps the update-available subset through the same set. It cannot return a custom
+directory selected by lock or transcript text. Raw lock data and raw CLI output
+are never logged or presented.
 
 Deferred removal covers the stdout file, working directory, canonical lock, and
 complete disposable home on success, launch failure, nonzero exit, timeout,
 cancellation, and parse failure. The availability result is applied only after
-restored sources have finished scanning. Until a complete result is accepted,
-the model makes no positive update claim; cancellation and every error clear
-prior positives. This containment discovers availability only. It does not make
-the app's actual update action agent-scoped, so that action remains fail-closed
-as described above.
+restored sources have finished scanning. The model canonicalizes both result and
+installed URLs and applies `.current` or `.available` only when one checked URL
+has exactly one installed match. A discovered installation at one of the five
+fixed built-in destinations can receive status; same-named custom-path copies,
+unchecked installations, and ambiguous duplicate canonical identities receive
+explicit `.unknown`, which suppresses stale legacy version badges and prevents
+an all-current claim. The normalized last result is reapplied after successful
+rescans, so newly discovered unchecked skills downgrade the overall state to
+partial. Cancellation and every error clear prior positives. This containment
+discovers availability only. It does not make the app's actual update action
+agent-scoped, so that action remains fail-closed as described above.
 
 ## Automatic source discovery and persistence
 
@@ -241,7 +258,9 @@ content sandbox:
   does not create and supervise a separate POSIX process group for every
   descendant the upstream CLI may spawn, so descendant work may continue after
   the direct process is reported stopped, including during a disposable-home
-  availability probe.
+  availability probe. An inherited stdout writer can also outlive the direct
+  process; the one-second drain deadline prevents a wedge and discards the
+  availability result, but does not terminate that descendant.
 - Disabling App Sandbox gives the app and child process the signed-in user's
   ambient filesystem access. Hardened Runtime does not replace sandbox
   isolation.

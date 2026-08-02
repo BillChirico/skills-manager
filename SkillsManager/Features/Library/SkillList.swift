@@ -239,6 +239,14 @@ struct SkillList: View {
                     description: "Comparing tracked skills with their remote sources.",
                     action: nil
                 )
+            case .partial:
+                return EmptyContent(
+                    title: "Some Skills Were Not Checked",
+                    systemImage: "questionmark.circle",
+                    description:
+                        "No updates were found among uniquely matched tracked skills. Other installed skills have unknown update status.",
+                    action: .checkForUpdates
+                )
             case .current:
                 return EmptyContent(
                     title: "All Skills Are Up to Date",

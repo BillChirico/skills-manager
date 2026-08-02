@@ -209,7 +209,18 @@ struct SkillLibraryModelTests {
             name: "Team Skills",
             directoryURL: URL(filePath: "/skills/team")
         )
-        let manager = UpdateAvailabilityManager(result: .success(["discovered"]))
+        let manager = UpdateAvailabilityManager(
+            result: .success(
+                SkillUpdateAvailability(
+                    checkedSkillDirectoryURLs: [
+                        persistedSource.directoryURL.appending(path: "discovered")
+                    ],
+                    updateAvailableSkillDirectoryURLs: [
+                        persistedSource.directoryURL.appending(path: "discovered")
+                    ]
+                )
+            )
+        )
         let model = makeModel(
             sourceStore: MemorySourceStore(sources: [persistedSource]),
             discoverer: FixtureDiscoverer(),
@@ -221,9 +232,269 @@ struct SkillLibraryModelTests {
 
         let skill = try #require(model.skills.first)
         #expect(skill.hasUpdate)
-        #expect(skill.isUpdateAvailable == true)
+        #expect(skill.updateStatus == .available)
         #expect(model.updateCheckState == .current)
         #expect(await manager.checkCount == 1)
+    }
+
+    @Test("A partial lock preserves unknown state for untracked installed skills")
+    func updateCheckPreservesUntrackedSkillsAsUnknown() async throws {
+        let source = SkillSource(
+            name: "Team Skills",
+            directoryURL: URL(filePath: "/skills/team")
+        )
+        let tracked = AgentSkill(
+            name: "Tracked",
+            summary: "Tracked by the global lock.",
+            directoryURL: source.directoryURL.appending(path: "tracked"),
+            sourceID: source.id
+        )
+        let untracked = AgentSkill(
+            name: "Local Only",
+            summary: "Not tracked by the global lock.",
+            installedVersion: "1.0.0",
+            availableVersion: "2.0.0",
+            directoryURL: source.directoryURL.appending(path: "local-only"),
+            sourceID: source.id
+        )
+        let manager = UpdateAvailabilityManager(
+            result: .success(
+                SkillUpdateAvailability(
+                    checkedSkillDirectoryURLs: [tracked.directoryURL],
+                    updateAvailableSkillDirectoryURLs: []
+                )
+            )
+        )
+        let model = SkillLibraryModel(
+            sources: [source],
+            skills: [tracked, untracked],
+            skillManager: manager
+        )
+
+        await model.refreshUpdateAvailability()
+
+        let checkedSkill = try #require(
+            model.skills.first { $0.directoryURL.lastPathComponent == "tracked" }
+        )
+        let uncheckedSkill = try #require(
+            model.skills.first { $0.directoryURL.lastPathComponent == "local-only" }
+        )
+        #expect(checkedSkill.updateStatus == .current)
+        #expect(uncheckedSkill.updateStatus == .unknown)
+        #expect(uncheckedSkill.hasUpdate == false)
+        #expect(model.updateCheckState == .partial)
+    }
+
+    @Test("An empty lock never claims that an installed skill is current")
+    func emptyUpdateCheckPreservesUnknownState() async throws {
+        let source = SkillSource(
+            name: "Local Skills",
+            directoryURL: URL(filePath: "/skills/local")
+        )
+        let skill = AgentSkill(
+            name: "Local Only",
+            summary: "Not tracked by the global lock.",
+            installedVersion: "1.0.0",
+            availableVersion: "2.0.0",
+            directoryURL: source.directoryURL.appending(path: "local-only"),
+            sourceID: source.id
+        )
+        let manager = UpdateAvailabilityManager(
+            result: .success(
+                SkillUpdateAvailability(
+                    checkedSkillDirectoryURLs: [],
+                    updateAvailableSkillDirectoryURLs: []
+                )
+            )
+        )
+        let model = SkillLibraryModel(
+            sources: [source],
+            skills: [skill],
+            skillManager: manager
+        )
+
+        await model.refreshUpdateAvailability()
+
+        let uncheckedSkill = try #require(model.skills.first)
+        #expect(uncheckedSkill.updateStatus == .unknown)
+        #expect(uncheckedSkill.hasUpdate == false)
+        #expect(model.updateCheckState == .partial)
+    }
+
+    @Test("An update-only identity from an alternate manager fails closed")
+    func invalidUpdateAvailabilityFailsClosed() async throws {
+        let source = SkillSource(
+            name: "Team Skills",
+            directoryURL: URL(filePath: "/skills/team")
+        )
+        let skill = AgentSkill(
+            name: "Injected",
+            summary: "Must not receive an unverified badge.",
+            updateStatus: .available,
+            directoryURL: source.directoryURL.appending(path: "injected"),
+            sourceID: source.id
+        )
+        let manager = UpdateAvailabilityManager(
+            result: .success(
+                SkillUpdateAvailability(
+                    checkedSkillDirectoryURLs: [],
+                    updateAvailableSkillDirectoryURLs: [skill.directoryURL]
+                )
+            )
+        )
+        let model = SkillLibraryModel(
+            sources: [source],
+            skills: [skill],
+            skillManager: manager
+        )
+
+        await model.refreshUpdateAvailability()
+
+        #expect(try #require(model.skills.first).updateStatus == .unknown)
+        #expect(model.updateCheckState == .unavailable)
+        #expect(model.presentedError?.title == "Unable to Check for Updates")
+    }
+
+    @Test("Same-named custom installations do not inherit a global lock result")
+    func updateCheckDoesNotConflateDuplicateInstallationNames() async {
+        let firstSource = SkillSource(
+            name: "First",
+            directoryURL: URL(filePath: "/skills/first")
+        )
+        let secondSource = SkillSource(
+            name: "Second",
+            directoryURL: URL(filePath: "/skills/second")
+        )
+        let skills = [firstSource, secondSource].map { source in
+            AgentSkill(
+                name: "Shared Name",
+                summary: "A distinct installation.",
+                installedVersion: "1.0.0",
+                availableVersion: "2.0.0",
+                directoryURL: source.directoryURL.appending(path: "shared"),
+                sourceID: source.id
+            )
+        }
+        let manager = UpdateAvailabilityManager(
+            result: .success(
+                SkillUpdateAvailability(
+                    checkedSkillDirectoryURLs: [
+                        URL(filePath: "/Users/reviewer/.agents/skills/shared")
+                    ],
+                    updateAvailableSkillDirectoryURLs: [
+                        URL(filePath: "/Users/reviewer/.agents/skills/shared")
+                    ]
+                )
+            )
+        )
+        let model = SkillLibraryModel(
+            sources: [firstSource, secondSource],
+            skills: skills,
+            skillManager: manager
+        )
+
+        await model.refreshUpdateAvailability()
+
+        #expect(model.skills.allSatisfy { $0.updateStatus == .unknown })
+        #expect(model.skills.allSatisfy { $0.hasUpdate == false })
+        #expect(model.updatesAvailableCount == 0)
+        #expect(model.updateCheckState == .partial)
+    }
+
+    @Test("A fixed agent destination matches while a same-named custom skill stays unknown")
+    func updateCheckMatchesNonUniversalAgentDestinationOnly() async throws {
+        let homeDirectory = URL(filePath: "/Users/reviewer", directoryHint: .isDirectory)
+        let agentSource = SkillSource(
+            name: "Claude Code",
+            directoryURL: try #require(
+                SkillAgent.claudeCode.defaultSkillsDirectory(in: homeDirectory)
+            ),
+            agent: .claudeCode
+        )
+        let customSource = SkillSource(
+            name: "Custom",
+            directoryURL: URL(filePath: "/custom/skills", directoryHint: .isDirectory)
+        )
+        let skillName = "shared"
+        let checkedURLs = Set(
+            SkillAgent.allCases.compactMap { agent in
+                agent.defaultSkillsDirectory(in: homeDirectory)?.appending(
+                    path: skillName,
+                    directoryHint: .isDirectory
+                )
+            }
+        )
+        let manager = UpdateAvailabilityManager(
+            result: .success(
+                SkillUpdateAvailability(
+                    checkedSkillDirectoryURLs: checkedURLs,
+                    updateAvailableSkillDirectoryURLs: checkedURLs
+                )
+            )
+        )
+        let model = SkillLibraryModel(
+            sources: [agentSource, customSource],
+            skills: [agentSource, customSource].map { source in
+                AgentSkill(
+                    name: "Shared",
+                    summary: "A same-named installation.",
+                    directoryURL: source.directoryURL.appending(
+                        path: skillName,
+                        directoryHint: .isDirectory
+                    ),
+                    sourceID: source.id
+                )
+            },
+            skillManager: manager
+        )
+
+        await model.refreshUpdateAvailability()
+
+        let agentSkill = try #require(model.skills.first { $0.sourceID == agentSource.id })
+        let customSkill = try #require(model.skills.first { $0.sourceID == customSource.id })
+        #expect(agentSkill.updateStatus == .available)
+        #expect(agentSkill.hasUpdate)
+        #expect(customSkill.updateStatus == .unknown)
+        #expect(customSkill.hasUpdate == false)
+        #expect(model.updatesAvailableCount == 1)
+        #expect(model.updateCheckState == .partial)
+    }
+
+    @Test("A sole custom installation cannot match a stale global lock entry by name")
+    func updateCheckDoesNotMatchCustomSkillByName() async throws {
+        let source = SkillSource(
+            name: "Custom",
+            directoryURL: URL(filePath: "/custom/skills")
+        )
+        let skill = AgentSkill(
+            name: "Shared Name",
+            summary: "Unrelated to the global lock entry.",
+            installedVersion: "1.0.0",
+            availableVersion: "2.0.0",
+            directoryURL: source.directoryURL.appending(path: "shared"),
+            sourceID: source.id
+        )
+        let globalSkillURL = URL(filePath: "/Users/reviewer/.agents/skills/shared")
+        let manager = UpdateAvailabilityManager(
+            result: .success(
+                SkillUpdateAvailability(
+                    checkedSkillDirectoryURLs: [globalSkillURL],
+                    updateAvailableSkillDirectoryURLs: [globalSkillURL]
+                )
+            )
+        )
+        let model = SkillLibraryModel(
+            sources: [source],
+            skills: [skill],
+            skillManager: manager
+        )
+
+        await model.refreshUpdateAvailability()
+
+        let customSkill = try #require(model.skills.first)
+        #expect(customSkill.updateStatus == .unknown)
+        #expect(customSkill.hasUpdate == false)
+        #expect(model.updateCheckState == .partial)
     }
 
     @Test("An ambiguous update result clears positive claims and reports unavailable state")
@@ -243,7 +514,7 @@ struct SkillLibraryModelTests {
 
         let skill = try #require(model.skills.first)
         #expect(skill.hasUpdate == false)
-        #expect(skill.isUpdateAvailable == false)
+        #expect(skill.updateStatus == .unknown)
         #expect(model.updateCheckState == .unavailable)
         #expect(model.presentedError?.title == "Unable to Check for Updates")
     }
@@ -265,7 +536,7 @@ struct SkillLibraryModelTests {
 
         let skill = try #require(model.skills.first)
         #expect(skill.hasUpdate == false)
-        #expect(skill.isUpdateAvailable == false)
+        #expect(skill.updateStatus == .unknown)
         #expect(model.updateCheckState == .idle)
         #expect(model.presentedError == nil)
     }
@@ -276,7 +547,18 @@ struct SkillLibraryModelTests {
             name: "Team Skills",
             directoryURL: URL(filePath: "/skills/team")
         )
-        let manager = UpdateAvailabilityManager(result: .success(["discovered"]))
+        let manager = UpdateAvailabilityManager(
+            result: .success(
+                SkillUpdateAvailability(
+                    checkedSkillDirectoryURLs: [
+                        persistedSource.directoryURL.appending(path: "discovered")
+                    ],
+                    updateAvailableSkillDirectoryURLs: [
+                        persistedSource.directoryURL.appending(path: "discovered")
+                    ]
+                )
+            )
+        )
         let model = makeModel(
             sourceStore: MemorySourceStore(sources: [persistedSource]),
             discoverer: FixtureDiscoverer(),
@@ -286,7 +568,47 @@ struct SkillLibraryModelTests {
 
         try await model.rescanSource(persistedSource.id)
 
-        #expect(model.skills.first?.isUpdateAvailable == true)
+        #expect(model.skills.first?.updateStatus == .available)
+        #expect(model.updateCheckState == .current)
+    }
+
+    @Test("A rescan downgrades current when it discovers an unchecked skill")
+    func rescanReconcilesUpdateCoverage() async throws {
+        let source = SkillSource(
+            name: "Team Skills",
+            directoryURL: URL(filePath: "/skills/team")
+        )
+        let checkedSkill = AgentSkill(
+            name: "Checked",
+            summary: "Covered by the last probe.",
+            directoryURL: source.directoryURL.appending(path: "checked"),
+            sourceID: source.id
+        )
+        let manager = UpdateAvailabilityManager(
+            result: .success(
+                SkillUpdateAvailability(
+                    checkedSkillDirectoryURLs: [checkedSkill.directoryURL],
+                    updateAvailableSkillDirectoryURLs: []
+                )
+            )
+        )
+        let model = SkillLibraryModel(
+            sources: [source],
+            skills: [checkedSkill],
+            discoverer: ExpandedFixtureDiscoverer(),
+            skillManager: manager
+        )
+        await model.refreshUpdateAvailability()
+        #expect(model.updateCheckState == .current)
+
+        try await model.rescanSource(source.id)
+
+        let addedSkill = try #require(
+            model.skills.first { $0.directoryURL.lastPathComponent == "added" }
+        )
+        #expect(addedSkill.updateStatus == .unknown)
+        #expect(addedSkill.hasUpdate == false)
+        #expect(model.updateCheckState == .partial)
     }
 
     @Test("Restoring automatically adds and scans existing standard agent folders")
@@ -1807,6 +2129,27 @@ private struct UpdatedFixtureDiscoverer: SkillDiscovering {
     }
 }
 
+private struct ExpandedFixtureDiscoverer: SkillDiscovering {
+    func discoverSkills(in source: SkillSource) async throws -> [AgentSkill] {
+        [
+            AgentSkill(
+                name: "Checked",
+                summary: "Covered by the last probe.",
+                directoryURL: source.directoryURL.appending(path: "checked"),
+                sourceID: source.id
+            ),
+            AgentSkill(
+                name: "Added",
+                summary: "Discovered after the last probe.",
+                installedVersion: "1.0.0",
+                availableVersion: "2.0.0",
+                directoryURL: source.directoryURL.appending(path: "added"),
+                sourceID: source.id
+            ),
+        ]
+    }
+}
+
 private struct FailingDiscoverer: SkillDiscovering {
     struct ScanError: LocalizedError {
         var errorDescription: String? {
@@ -1887,7 +2230,7 @@ private actor RecordingLifecycleManager: SkillManaging {
 
 private actor UpdateAvailabilityManager: SkillManaging {
     enum Result: Sendable {
-        case success(Set<String>)
+        case success(SkillUpdateAvailability)
         case failure
         case cancelled
     }
@@ -1905,11 +2248,11 @@ private actor UpdateAvailabilityManager: SkillManaging {
         self.result = result
     }
 
-    func checkForUpdates() async throws -> Set<String> {
+    func checkForUpdates() async throws -> SkillUpdateAvailability {
         checkCount += 1
         switch result {
-        case .success(let names):
-            return names
+        case .success(let availability):
+            return availability
         case .failure:
             throw CheckError()
         case .cancelled:

@@ -1,6 +1,10 @@
 import Foundation
 import Testing
 
+#if canImport(Darwin)
+    import Darwin
+#endif
+
 @testable import SkillsCore
 
 struct SkillsCLIManagerTests {
@@ -727,7 +731,13 @@ struct SkillsCLIManagerTests {
             JSONSerialization.jsonObject(with: mirroredLockData) as? [String: Any]
         )
 
-        #expect(updates == ["swift-testing-pro"])
+        let expectedSkillURLs = expectedUpdateDirectoryURLs(
+            in: homeDirectory,
+            skillName: "swift-testing-pro"
+        )
+        #expect(expectedSkillURLs.count == 5)
+        #expect(updates.checkedSkillDirectoryURLs == expectedSkillURLs)
+        #expect(updates.updateAvailableSkillDirectoryURLs == expectedSkillURLs)
         #expect(
             command.arguments
                 == [
@@ -796,7 +806,7 @@ struct SkillsCLIManagerTests {
         }
     }
 
-    @Test("A confirmed no-update transcript returns an empty set")
+    @Test("A confirmed no-update transcript identifies the checked skill")
     func updateAvailabilityParsesNoUpdates() async throws {
         let homeDirectory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: homeDirectory) }
@@ -818,7 +828,29 @@ struct SkillsCLIManagerTests {
 
         let updates = try await manager.checkForUpdates()
 
-        #expect(updates.isEmpty)
+        #expect(
+            updates.checkedSkillDirectoryURLs
+                == expectedUpdateDirectoryURLs(
+                    in: homeDirectory,
+                    skillName: "swift-testing-pro"
+                )
+        )
+        #expect(updates.updateAvailableSkillDirectoryURLs.isEmpty)
+    }
+
+    @Test("An empty valid lock reports that no installed names were checked")
+    func updateAvailabilityPreservesEmptyLockAsUnchecked() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+        try writeSkillLock(in: homeDirectory, skills: [:])
+        let runner = UpdateCheckCommandRunner(output: "")
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        let availability = try await manager.checkForUpdates()
+
+        #expect(availability.checkedSkillDirectoryURLs.isEmpty)
+        #expect(availability.updateAvailableSkillDirectoryURLs.isEmpty)
+        #expect(await runner.commands.isEmpty)
     }
 
     @Test("Unknown update output fails closed and cleans every temporary path")
@@ -1009,7 +1041,14 @@ struct SkillsCLIManagerTests {
 
         let updates = try await manager.checkForUpdates()
 
-        #expect(updates.isEmpty)
+        #expect(
+            updates.checkedSkillDirectoryURLs
+                == expectedUpdateDirectoryURLs(
+                    in: homeDirectory,
+                    skillName: "swift-testing-pro"
+                )
+        )
+        #expect(updates.updateAvailableSkillDirectoryURLs.isEmpty)
     }
 
     @Test(
@@ -1130,13 +1169,21 @@ struct SkillsCLIManagerTests {
     func processOutputLimit() async throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
+        let outputURL = directory.appending(path: "stdout")
+        try #require(
+            FileManager.default.createFile(
+                atPath: outputURL.path(percentEncoded: false),
+                contents: Data(),
+                attributes: [.posixPermissions: 0o600]
+            )
+        )
         let runner = FoundationProcessCommandRunner(terminationGracePeriod: 0.05)
         let command = ProcessCommand(
             executableURL: URL(filePath: "/bin/sh"),
             arguments: ["-c", "while :; do printf '0123456789'; done"],
             environment: ["PATH": "/usr/bin:/bin"],
             currentDirectoryURL: directory,
-            standardOutputURL: directory.appending(path: "stdout"),
+            standardOutputURL: outputURL,
             maximumStandardOutputBytes: 32
         )
         let clock = ContinuousClock()
@@ -1200,6 +1247,112 @@ struct SkillsCLIManagerTests {
             try await task.value
         }
     }
+
+    @Test("Cancelling a captured command closes its reader without a descriptor race")
+    func processOutputCancellation() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let outputURL = directory.appending(path: "stdout")
+        let readinessURL = directory.appending(path: "ready")
+        try #require(
+            FileManager.default.createFile(
+                atPath: outputURL.path(percentEncoded: false),
+                contents: Data(),
+                attributes: [.posixPermissions: 0o600]
+            )
+        )
+        let runner = FoundationProcessCommandRunner(
+            timeout: 30,
+            terminationGracePeriod: 0.05
+        )
+        let command = ProcessCommand(
+            executableURL: URL(filePath: "/bin/sh"),
+            arguments: [
+                "-c",
+                "printf ready > \"$1\"; printf x; trap '' TERM; while :; do :; done",
+                "sh",
+                readinessURL.path(percentEncoded: false),
+            ],
+            environment: ["PATH": "/usr/bin:/bin"],
+            currentDirectoryURL: directory,
+            standardOutputURL: outputURL,
+            maximumStandardOutputBytes: 1_024
+        )
+        let task = Task {
+            try await runner.run(command)
+        }
+        var didLaunch = false
+        for _ in 0..<100 {
+            if FileManager.default.fileExists(
+                atPath: readinessURL.path(percentEncoded: false)
+            ) {
+                didLaunch = true
+                break
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        guard didLaunch else {
+            task.cancel()
+            _ = await task.result
+            Issue.record("The captured subprocess did not signal readiness")
+            return
+        }
+        let clock = ContinuousClock()
+        let start = clock.now
+
+        task.cancel()
+
+        await #expect(throws: SkillsCLIError.commandCancelled) {
+            try await task.value
+        }
+        #expect(start.duration(to: clock.now) < .seconds(2))
+    }
+
+    #if os(macOS)
+        @Test("An inherited stdout writer cannot wedge output draining")
+        func processOutputDrainDeadline() async throws {
+            let directory = try makeTemporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let outputURL = directory.appending(path: "stdout")
+            let childPIDURL = directory.appending(path: "child-pid")
+            try #require(
+                FileManager.default.createFile(
+                    atPath: outputURL.path(percentEncoded: false),
+                    contents: Data(),
+                    attributes: [.posixPermissions: 0o600]
+                )
+            )
+            defer {
+                if let pidText = try? String(contentsOf: childPIDURL, encoding: .utf8),
+                    let pid = Int32(pidText)
+                {
+                    _ = Darwin.kill(pid, SIGKILL)
+                }
+            }
+            let runner = FoundationProcessCommandRunner()
+            let command = ProcessCommand(
+                executableURL: URL(filePath: "/bin/sh"),
+                arguments: [
+                    "-c",
+                    "trap '' HUP; sleep 30 & printf '%s' \"$!\" > \"$1\"; printf 'parent-finished'",
+                    "sh",
+                    childPIDURL.path(percentEncoded: false),
+                ],
+                environment: ["PATH": "/usr/bin:/bin"],
+                currentDirectoryURL: directory,
+                standardOutputURL: outputURL,
+                maximumStandardOutputBytes: 32
+            )
+            let clock = ContinuousClock()
+            let start = clock.now
+
+            await #expect(throws: SkillsCLIError.updateCheckOutputInvalid) {
+                try await runner.run(command)
+            }
+
+            #expect(start.duration(to: clock.now) < .seconds(2))
+        }
+    #endif
 
     @Test("Lifecycle commands stay serialized while the process runner is suspended")
     func serializesCommands() async throws {
@@ -1336,6 +1489,20 @@ struct SkillsCLIManagerTests {
             "installedAt": "2026-08-01T00:00:00.000Z",
             "updatedAt": "2026-08-01T00:00:00.000Z",
         ]
+    }
+
+    private func expectedUpdateDirectoryURLs(
+        in homeDirectory: URL,
+        skillName: String
+    ) -> Set<URL> {
+        Set(
+            SkillAgent.allCases.compactMap { agent in
+                agent.defaultSkillsDirectory(in: homeDirectory)?.appending(
+                    path: skillName,
+                    directoryHint: .isDirectory
+                )
+            }
+        )
     }
 
     private func writeSkillLock(

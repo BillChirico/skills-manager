@@ -98,11 +98,26 @@ hand-off when full Xcode is available. If Xcode is unavailable, run
   available update with visible text and a symbol, and include `Update available`
   in the row's explicit combined accessibility label; color alone is not enough.
 - Run one update-availability check only after restored sources finish scanning.
-  Clear prior positive detections before awaiting the result, apply a successful
-  result to every matching installation directory name in one main-actor update,
-  and distinguish idle, checking, current, and unavailable UI states. A
-  cancellation or error must leave no positive update claim. Preserve an
-  authoritative detection result across later source rescans.
+  Clear prior positive detections before awaiting the result. Keep exact checked
+  built-in-directory URL identities separate from the update-available subset
+  and require the latter to be a subset of the former. A version-3 global lock
+  has no per-agent destination list, so project each validated name into all
+  five deduplicated fixed account-home locations: `.agents/skills` (shared by
+  Global and Codex), `.claude/skills`, `.cursor/skills`, `.copilot/skills`, and
+  `.gemini/skills`; never match by final path component. Canonicalize returned
+  and installed URLs, then apply an authoritative status only when one checked
+  canonical URL maps to exactly one installed skill. Same-named copies outside
+  those fixed destinations, empty or partial locks, unchecked URLs, and
+  ambiguous duplicate physical identities remain unknown and must produce a
+  partial state rather than an all-current claim.
+- Use `SkillUpdateStatus.unknown`, `.current`, and `.available` after a probe.
+  Reserve a nil status for pre-probe or legacy decoded data, where version
+  comparison is a compatibility fallback. Explicit `.unknown` must suppress
+  stale version-based update badges. Retain the normalized last successful
+  result and reapply it after each successful rescan so covered skills keep their
+  status while newly discovered unchecked skills downgrade the overall state to
+  partial. Distinguish idle, checking, partial, current, and unavailable UI
+  states. A cancellation or error must leave no positive update claim.
 
 ## Testing conventions
 
@@ -111,6 +126,11 @@ hand-off when full Xcode is available. If Xcode is unavailable, run
 - Mirror production folders in test folders where practical.
 - Keep tests deterministic, parallel-safe, and independent of real user files.
 - Prefer `#require` for preconditions and `#expect` for behavior assertions.
+- Keep real-process regressions for the stdout byte ceiling and capture-task
+  cancellation, plus the macOS-only inherited-writer drain deadline. Make the
+  cancellation subprocess create a readiness marker and wait for it before
+  cancelling; a fixed sleep does not prove the child reached the intended state.
+  Do not substitute an injected runner for those descriptor-lifecycle checks.
 
 ## Project-file policy
 
@@ -249,17 +269,26 @@ project lock, inherited npm/Git configuration, credentials, or unrelated parent
 variables. Pre-open the owner-only stdout file before launch, bound the pipe to
 256 KiB while streaming, and return the captured bytes without reopening a
 child-writable pathname; exceeding the limit must stop the direct process and
-fail closed. After a zero exit, require bounded UTF-8 and parse only the reviewed
-transcript grammar in its expected order. Reject
-unknown terminal controls or lines, failure/skip/deletion diagnostics,
-unexpected or duplicate names and sources, and inconsistent found/update/
-summary counts. Return only names present in the validated lock. Deferred
-cleanup must cover the stdout file, working directory, canonical lock, and full
-disposable home after success, launch failure, nonzero exit, timeout,
-cancellation, and parse failure. Direct the reviewed upstream path's downloads
-and installs into that disposable home and never provide a real skill path, but
-do not describe this environment configuration as a filesystem sandbox or
-upstream `check` as read-only.
+fail closed. The capture task must be the sole owner and closer of the pipe's read
+descriptor. Cancel and await that task when the caller is cancelled, capture
+fails, or the one-second post-process drain deadline expires; never race it with
+an external descriptor close. After a zero exit, require bounded UTF-8 and parse
+only the reviewed transcript grammar in its expected order. Reject unknown
+terminal controls or lines, failure/skip/deletion diagnostics, unexpected or
+duplicate names and sources, and inconsistent found/update/summary counts.
+The version-3 global lock has no per-agent destination list. Convert every
+validated checked name and update-available name into exact file URL identities
+under all five deduplicated fixed account-home locations: `.agents/skills`
+(shared by Global and Codex), `.claude/skills`, `.cursor/skills`,
+`.copilot/skills`, and `.gemini/skills`; do not accept a path from lock or
+transcript text. Return those checked URLs separately from the update-available
+URL subset, and never treat an empty lock as evidence that installed skills are
+current. Deferred cleanup must cover the stdout file, working directory,
+canonical lock, and full disposable home after success, launch failure, nonzero
+exit, timeout, cancellation, and parse failure. Direct the reviewed upstream
+path's downloads and installs into that disposable home and never provide a real
+skill path, but do not describe this environment configuration as a filesystem
+sandbox or upstream `check` as read-only.
 
 Treat each selected skill or destination as an independent lifecycle outcome,
 preserve failures in the UI, and rescan disk after successes. Removal

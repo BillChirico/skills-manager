@@ -75,7 +75,7 @@ struct AgentSkillTests {
         let skill = AgentSkill(
             name: "PDF Export",
             summary: "Render markdown as a publication-ready PDF.",
-            isUpdateAvailable: true,
+            updateStatus: .available,
             directoryURL: URL(filePath: "/skills/pdf-export"),
             sourceID: UUID()
         )
@@ -90,7 +90,22 @@ struct AgentSkillTests {
             summary: "Render markdown as a publication-ready PDF.",
             installedVersion: "1.4.0",
             availableVersion: "1.5.0",
-            isUpdateAvailable: false,
+            updateStatus: .current,
+            directoryURL: URL(filePath: "/skills/pdf-export"),
+            sourceID: UUID()
+        )
+
+        #expect(skill.hasUpdate == false)
+    }
+
+    @Test("An explicit unknown result suppresses stale version metadata")
+    func unknownUpdateStatusOverridesVersions() {
+        let skill = AgentSkill(
+            name: "PDF Export",
+            summary: "Render markdown as a publication-ready PDF.",
+            installedVersion: "1.4.0",
+            availableVersion: "1.5.0",
+            updateStatus: .unknown,
             directoryURL: URL(filePath: "/skills/pdf-export"),
             sourceID: UUID()
         )

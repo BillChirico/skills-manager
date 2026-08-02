@@ -18,13 +18,24 @@ At a glance:
   fields into an owner-only disposable `HOME`/`CODEX_HOME`/`TMPDIR`, run the
   exact global `npx --yes --package skills@1.5.21 -- skills check --global --yes`
   command with the scrubbed environment and bounded, pre-opened private stdout
-  capture, parse those bytes without reopening the child-writable path, accept
-  only the reviewed transcript, fail closed on every ambiguity, and clean the
+  capture. Let only the capture task own and close the read descriptor; cancel
+  and await it on caller cancellation or the one-second post-exit drain deadline.
+  Parse the returned bytes without reopening the child-writable path, accept only
+  the reviewed transcript, fail closed on every ambiguity, and clean the
   canonical lock, output, working directory, and disposable home on every exit
   path. Never log or present raw lock or CLI output.
-- Run availability after restored-source scans, make a completed detection
-  authoritative, clear positive claims on errors or cancellation, keep updates
-  first within every selected sort, and expose the status with text, a symbol,
+- Run availability after restored-source scans and carry checked canonical
+  built-in-directory URLs separately from the update-available subset. Because
+  the version-3 global lock has no per-agent destination list, project every
+  validated name into the five deduplicated fixed account-home locations:
+  `.agents/skills` (shared by Global and Codex), `.claude/skills`,
+  `.cursor/skills`, `.copilot/skills`, and `.gemini/skills`. Canonicalize result
+  and installed URLs and intersect them exactly; never match by name. A
+  same-named custom-path copy remains unknown. Use explicit unknown/current/
+  available status after probing, reserving nil for pre-probe or legacy fallback,
+  so incomplete coverage suppresses stale version badges. Reapply the normalized
+  last result after successful rescans; new unchecked skills make the state
+  partial. Keep confirmed updates first and expose status with text, a symbol,
   and an explicit accessibility label. The actual update action still fails
   closed because release 1.5.21 cannot scope a mutation to one agent.
 - Remote content is untrusted; preserve the validated shell-free CLI boundary,
