@@ -70,6 +70,8 @@ final class SkillLibraryModel {
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private var hasRestoredSources = false
     @ObservationIgnored private var excludedAutomaticDirectoryURLs: Set<URL> = []
+    @ObservationIgnored private var sourceMutationIsRunning = false
+    @ObservationIgnored private var sourceMutationWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(
         sources: [SkillSource] = [],
@@ -218,178 +220,105 @@ final class SkillLibraryModel {
     }
 
     func restoreSources() async {
-        guard hasRestoredSources == false else {
-            return
-        }
-        hasRestoredSources = true
+        let sourcesToScan = await withSerializedSourceMutation { () -> [SkillSource] in
+            guard hasRestoredSources == false else {
+                return []
+            }
+            hasRestoredSources = true
 
-        guard let sourceStore else {
-            return
-        }
+            guard let sourceStore else {
+                return []
+            }
 
-        do {
-            let configuration = try await sourceStore.loadConfiguration()
-            var restoredSources = configuration.sources
-            var restoredSourceStates: [SkillSource.ID: SourceState] = [:]
-            var didRefreshBookmark = false
+            do {
+                let configuration = try await sourceStore.loadConfiguration()
+                var restoredSources = configuration.sources
+                var restoredSourceStates: [SkillSource.ID: SourceState] = [:]
+                var didRefreshBookmark = false
 
-            for index in restoredSources.indices {
-                let sourceID = restoredSources[index].id
-                restoredSourceStates[sourceID] = .available
+                for index in restoredSources.indices {
+                    let sourceID = restoredSources[index].id
+                    restoredSourceStates[sourceID] = .available
 
-                guard
-                    let bookmarkData = restoredSources[index].bookmarkData,
-                    let bookmarker
-                else {
-                    continue
-                }
+                    guard
+                        let bookmarkData = restoredSources[index].bookmarkData,
+                        let bookmarker
+                    else {
+                        continue
+                    }
 
-                do {
-                    let resolved = try bookmarker.resolveBookmark(bookmarkData)
-                    restoredSources[index].directoryURL = resolved.url
+                    do {
+                        let resolved = try bookmarker.resolveBookmark(bookmarkData)
+                        restoredSources[index].directoryURL = resolved.url
 
-                    if sourceAccess?.beginAccessing(resolved.url, for: sourceID) == false {
+                        if sourceAccess?.beginAccessing(resolved.url, for: sourceID) == false {
+                            restoredSourceStates[sourceID] = .unavailable
+                        }
+
+                        if resolved.isStale {
+                            restoredSources[index].bookmarkData =
+                                try bookmarker.makeBookmark(for: resolved.url)
+                            didRefreshBookmark = true
+                        }
+                    } catch {
                         restoredSourceStates[sourceID] = .unavailable
                     }
-
-                    if resolved.isStale {
-                        restoredSources[index].bookmarkData =
-                            try bookmarker.makeBookmark(for: resolved.url)
-                        didRefreshBookmark = true
-                    }
-                } catch {
-                    restoredSourceStates[sourceID] = .unavailable
                 }
-            }
 
-            let configuredDirectoryURLs = Set(
-                restoredSources.map { $0.directoryURL.standardizedFileURL }
-            )
-            let normalizedExclusions = Set(
-                configuration.excludedAutomaticDirectoryURLs.map(\.standardizedFileURL)
-            )
-            let reconciledExclusions = normalizedExclusions.subtracting(
-                configuredDirectoryURLs
-            )
-            var mergedDirectoryURLs = configuredDirectoryURLs
-            let automaticSources = automaticSourceCandidates().filter { candidate in
-                let directoryURL = candidate.directoryURL.standardizedFileURL
-                guard reconciledExclusions.contains(directoryURL) == false else {
-                    return false
-                }
-                return mergedDirectoryURLs.insert(directoryURL).inserted
-            }
-
-            restoredSources.append(contentsOf: automaticSources)
-            for source in automaticSources {
-                restoredSourceStates[source.id] = .available
-            }
-
-            let sortedRestoredSources = Self.sortedSources(restoredSources)
-            let didReconcileExclusions =
-                reconciledExclusions
-                != configuration.excludedAutomaticDirectoryURLs
-
-            if didRefreshBookmark
-                || automaticSources.isEmpty == false
-                || didReconcileExclusions
-            {
-                try await sourceStore.save(
-                    SkillSourceConfiguration(
-                        sources: sortedRestoredSources,
-                        excludedAutomaticDirectoryURLs: reconciledExclusions
-                    )
+                let configuredDirectoryURLs = Set(
+                    restoredSources.map { $0.directoryURL.standardizedFileURL }
                 )
-            }
+                let normalizedExclusions = Set(
+                    configuration.excludedAutomaticDirectoryURLs.map(\.standardizedFileURL)
+                )
+                let reconciledExclusions = normalizedExclusions.subtracting(
+                    configuredDirectoryURLs
+                )
+                var mergedDirectoryURLs = configuredDirectoryURLs
+                let automaticSources = automaticSourceCandidates().filter { candidate in
+                    let directoryURL = candidate.directoryURL.standardizedFileURL
+                    guard reconciledExclusions.contains(directoryURL) == false else {
+                        return false
+                    }
+                    return mergedDirectoryURLs.insert(directoryURL).inserted
+                }
 
-            sources = sortedRestoredSources
-            sourceStates = restoredSourceStates
-            excludedAutomaticDirectoryURLs = reconciledExclusions
+                restoredSources.append(contentsOf: automaticSources)
+                for source in automaticSources {
+                    restoredSourceStates[source.id] = .available
+                }
 
-            for source in sources
-            where source.isEnabled && sourceState(for: source.id) == .available {
-                do {
-                    try await rescanSource(source.id)
-                } catch {
-                    report(
-                        error,
-                        title: "Unable to Scan \(source.displayName)"
+                let sortedRestoredSources = Self.sortedSources(restoredSources)
+                let didReconcileExclusions =
+                    reconciledExclusions
+                    != configuration.excludedAutomaticDirectoryURLs
+
+                if didRefreshBookmark
+                    || automaticSources.isEmpty == false
+                    || didReconcileExclusions
+                {
+                    try await sourceStore.save(
+                        SkillSourceConfiguration(
+                            sources: sortedRestoredSources,
+                            excludedAutomaticDirectoryURLs: reconciledExclusions
+                        )
                     )
                 }
-            }
-        } catch {
-            report(error, title: "Unable to Restore Directories")
-        }
-    }
 
-    func addSource(
-        at directoryURL: URL,
-        agent: SkillAgent = .other
-    ) async throws {
-        let normalizedURL = directoryURL.standardizedFileURL
+                sources = sortedRestoredSources
+                sourceStates = restoredSourceStates
+                excludedAutomaticDirectoryURLs = reconciledExclusions
 
-        if let existingSource = sources.first(where: {
-            $0.directoryURL.standardizedFileURL == normalizedURL
-        }) {
-            let previousSidebarSelection = sidebarSelection
-            sidebarSelection = .source(existingSource.id)
-
-            if excludedAutomaticDirectoryURLs.remove(normalizedURL) != nil {
-                do {
-                    try await persistSources()
-                } catch {
-                    excludedAutomaticDirectoryURLs.insert(normalizedURL)
-                    sidebarSelection = previousSidebarSelection
-                    throw error
+                return sources.filter {
+                    $0.isEnabled && sourceState(for: $0.id) == .available
                 }
+            } catch {
+                report(error, title: "Unable to Restore Directories")
+                return []
             }
-
-            if sourceState(for: existingSource.id) == .unavailable {
-                try await recoverSource(existingSource.id, at: normalizedURL)
-            }
-            return
         }
 
-        var source = SkillSource(
-            name: normalizedURL.lastPathComponent,
-            directoryURL: normalizedURL,
-            agent: agent
-        )
-        let accessGranted =
-            sourceAccess?.beginAccessing(normalizedURL, for: source.id) ?? true
-
-        guard accessGranted else {
-            throw SourceAccessError.accessDenied
-        }
-
-        do {
-            source.bookmarkData = try bookmarker?.makeBookmark(for: normalizedURL)
-        } catch {
-            sourceAccess?.stopAccessing(sourceID: source.id)
-            throw error
-        }
-
-        let previousExcludedAutomaticDirectoryURLs =
-            excludedAutomaticDirectoryURLs
-        excludedAutomaticDirectoryURLs.remove(normalizedURL)
-        sources.append(source)
-        sources = Self.sortedSources(sources)
-        sourceStates[source.id] = .available
-        sidebarSelection = .source(source.id)
-
-        do {
-            try await persistSources()
-        } catch {
-            sources.removeAll { $0.id == source.id }
-            sourceStates[source.id] = nil
-            sourceAccess?.stopAccessing(sourceID: source.id)
-            excludedAutomaticDirectoryURLs =
-                previousExcludedAutomaticDirectoryURLs
-            sidebarSelection = .allSkills
-            throw error
-        }
-
-        if discoverer != nil {
+        for source in sourcesToScan {
             do {
                 try await rescanSource(source.id)
             } catch {
@@ -401,118 +330,226 @@ final class SkillLibraryModel {
         }
     }
 
+    func addSource(
+        at directoryURL: URL,
+        agent: SkillAgent = .other
+    ) async throws {
+        let normalizedURL = directoryURL.standardizedFileURL
+        let sourceToScan: SkillSource? = try await withSerializedSourceMutation {
+            if let existingSource = sources.first(where: {
+                $0.directoryURL.standardizedFileURL == normalizedURL
+            }) {
+                let previousSidebarSelection = sidebarSelection
+                sidebarSelection = .source(existingSource.id)
+
+                if excludedAutomaticDirectoryURLs.remove(normalizedURL) != nil {
+                    do {
+                        try await persistSources()
+                    } catch {
+                        excludedAutomaticDirectoryURLs.insert(normalizedURL)
+                        sidebarSelection = previousSidebarSelection
+                        throw error
+                    }
+                }
+
+                if sourceState(for: existingSource.id) == .unavailable {
+                    return try await recoverSource(existingSource.id, at: normalizedURL)
+                }
+                return nil
+            }
+
+            var source = SkillSource(
+                name: normalizedURL.lastPathComponent,
+                directoryURL: normalizedURL,
+                agent: agent
+            )
+            let accessGranted =
+                sourceAccess?.beginAccessing(normalizedURL, for: source.id) ?? true
+
+            guard accessGranted else {
+                throw SourceAccessError.accessDenied
+            }
+
+            do {
+                source.bookmarkData = try bookmarker?.makeBookmark(for: normalizedURL)
+            } catch {
+                sourceAccess?.stopAccessing(sourceID: source.id)
+                throw error
+            }
+
+            let previousExcludedAutomaticDirectoryURLs =
+                excludedAutomaticDirectoryURLs
+            excludedAutomaticDirectoryURLs.remove(normalizedURL)
+            sources.append(source)
+            sources = Self.sortedSources(sources)
+            sourceStates[source.id] = .available
+            sidebarSelection = .source(source.id)
+
+            do {
+                try await persistSources()
+            } catch {
+                sources.removeAll { $0.id == source.id }
+                sourceStates[source.id] = nil
+                sourceAccess?.stopAccessing(sourceID: source.id)
+                excludedAutomaticDirectoryURLs =
+                    previousExcludedAutomaticDirectoryURLs
+                sidebarSelection = .allSkills
+                throw error
+            }
+
+            return discoverer == nil ? nil : source
+        }
+
+        if let sourceToScan {
+            do {
+                try await rescanSource(sourceToScan.id)
+            } catch {
+                report(
+                    error,
+                    title: "Unable to Scan \(sourceToScan.displayName)"
+                )
+            }
+        }
+    }
+
     func relocateSource(_ sourceID: SkillSource.ID, to directoryURL: URL) async throws {
-        try await recoverSource(sourceID, at: directoryURL.standardizedFileURL)
+        let sourceToScan = try await withSerializedSourceMutation {
+            try await recoverSource(sourceID, at: directoryURL.standardizedFileURL)
+        }
+
+        if let sourceToScan {
+            do {
+                try await rescanSource(sourceToScan.id)
+            } catch {
+                report(
+                    error,
+                    title: "Unable to Scan \(sourceToScan.displayName)"
+                )
+            }
+        }
     }
 
     func renameSource(_ sourceID: SkillSource.ID, to name: String) async throws {
-        guard let index = sources.firstIndex(where: { $0.id == sourceID }) else {
-            return
-        }
+        try await withSerializedSourceMutation {
+            guard let index = sources.firstIndex(where: { $0.id == sourceID }) else {
+                return
+            }
 
-        let previousName = sources[index].name
-        sources[index].name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        sources = Self.sortedSources(sources)
+            let previousName = sources[index].name
+            sources[index].name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            sources = Self.sortedSources(sources)
 
-        do {
-            try await persistSources()
-        } catch {
-            guard let rollbackIndex = sources.firstIndex(where: { $0.id == sourceID }) else {
+            do {
+                try await persistSources()
+            } catch {
+                guard let rollbackIndex = sources.firstIndex(where: { $0.id == sourceID }) else {
+                    throw error
+                }
+                sources[rollbackIndex].name = previousName
+                sources = Self.sortedSources(sources)
                 throw error
             }
-            sources[rollbackIndex].name = previousName
-            sources = Self.sortedSources(sources)
-            throw error
         }
     }
 
     func setSourceAgent(_ agent: SkillAgent, sourceID: SkillSource.ID) async throws {
-        guard let index = sources.firstIndex(where: { $0.id == sourceID }) else {
-            return
-        }
+        try await withSerializedSourceMutation {
+            guard let index = sources.firstIndex(where: { $0.id == sourceID }) else {
+                return
+            }
 
-        let previousAgent = sources[index].agent
-        sources[index].agent = agent
-        sources = Self.sortedSources(sources)
+            let previousAgent = sources[index].agent
+            sources[index].agent = agent
+            sources = Self.sortedSources(sources)
 
-        do {
-            try await persistSources()
-        } catch {
-            guard let rollbackIndex = sources.firstIndex(where: { $0.id == sourceID }) else {
+            do {
+                try await persistSources()
+            } catch {
+                guard let rollbackIndex = sources.firstIndex(where: { $0.id == sourceID }) else {
+                    throw error
+                }
+                sources[rollbackIndex].agent = previousAgent
+                sources = Self.sortedSources(sources)
                 throw error
             }
-            sources[rollbackIndex].agent = previousAgent
-            sources = Self.sortedSources(sources)
-            throw error
         }
     }
 
     func setSourceEnabled(_ isEnabled: Bool, sourceID: SkillSource.ID) async throws {
-        guard let index = sources.firstIndex(where: { $0.id == sourceID }) else {
-            return
-        }
+        let shouldRescan = try await withSerializedSourceMutation {
+            guard let index = sources.firstIndex(where: { $0.id == sourceID }) else {
+                return false
+            }
 
-        let previousValue = sources[index].isEnabled
-        sources[index].isEnabled = isEnabled
+            let previousValue = sources[index].isEnabled
+            sources[index].isEnabled = isEnabled
 
-        do {
-            try await persistSources()
-        } catch {
-            guard let rollbackIndex = sources.firstIndex(where: { $0.id == sourceID }) else {
+            do {
+                try await persistSources()
+            } catch {
+                guard let rollbackIndex = sources.firstIndex(where: { $0.id == sourceID }) else {
+                    throw error
+                }
+                sources[rollbackIndex].isEnabled = previousValue
                 throw error
             }
-            sources[rollbackIndex].isEnabled = previousValue
-            throw error
+
+            if isEnabled == false {
+                selectedSkillIDs.subtract(
+                    skills.lazy.filter { $0.sourceID == sourceID }.map(\.id)
+                )
+            }
+            return isEnabled && sourceState(for: sourceID) == .available
         }
 
-        if isEnabled, sourceState(for: sourceID) == .available {
+        if shouldRescan {
             try await rescanSource(sourceID)
-        } else {
-            selectedSkillIDs.subtract(
-                skills.lazy.filter { $0.sourceID == sourceID }.map(\.id)
-            )
         }
     }
 
     func removeSource(_ sourceID: SkillSource.ID) async throws {
-        guard let removedSource = source(for: sourceID) else {
-            return
-        }
+        try await withSerializedSourceMutation {
+            guard let removedSource = source(for: sourceID) else {
+                return
+            }
 
-        let previousSources = sources
-        let previousSkills = skills
-        let previousSelection = selectedSkillIDs
-        let previousSourceStates = sourceStates
-        let previousSidebarSelection = sidebarSelection
-        let previousExcludedAutomaticDirectoryURLs =
-            excludedAutomaticDirectoryURLs
+            let previousSources = sources
+            let previousSkills = skills
+            let previousSelection = selectedSkillIDs
+            let previousSourceStates = sourceStates
+            let previousSidebarSelection = sidebarSelection
+            let previousExcludedAutomaticDirectoryURLs =
+                excludedAutomaticDirectoryURLs
 
-        let removedDirectoryURL = removedSource.directoryURL.standardizedFileURL
-        if standardSourceDirectoryURLs.contains(removedDirectoryURL) {
-            excludedAutomaticDirectoryURLs.insert(removedDirectoryURL)
-        }
+            let removedDirectoryURL = removedSource.directoryURL.standardizedFileURL
+            if standardSourceDirectoryURLs.contains(removedDirectoryURL) {
+                excludedAutomaticDirectoryURLs.insert(removedDirectoryURL)
+            }
 
-        sources.removeAll { $0.id == sourceID }
-        skills.removeAll { $0.sourceID == sourceID }
-        selectedSkillIDs.subtract(previousSkills.lazy.filter { $0.sourceID == sourceID }.map(\.id))
-        sourceStates[sourceID] = nil
+            sources.removeAll { $0.id == sourceID }
+            skills.removeAll { $0.sourceID == sourceID }
+            selectedSkillIDs.subtract(
+                previousSkills.lazy.filter { $0.sourceID == sourceID }.map(\.id)
+            )
+            sourceStates[sourceID] = nil
 
-        if sidebarSelection == .source(sourceID) {
-            sidebarSelection = .allSkills
-        }
+            if sidebarSelection == .source(sourceID) {
+                sidebarSelection = .allSkills
+            }
 
-        do {
-            try await persistSources()
-            sourceAccess?.stopAccessing(sourceID: sourceID)
-        } catch {
-            sources = previousSources
-            skills = previousSkills
-            sourceStates = previousSourceStates
-            sidebarSelection = previousSidebarSelection
-            selectedSkillIDs = previousSelection
-            excludedAutomaticDirectoryURLs =
-                previousExcludedAutomaticDirectoryURLs
-            throw error
+            do {
+                try await persistSources()
+                sourceAccess?.stopAccessing(sourceID: sourceID)
+            } catch {
+                sources = previousSources
+                skills = previousSkills
+                sourceStates = previousSourceStates
+                sidebarSelection = previousSidebarSelection
+                selectedSkillIDs = previousSelection
+                excludedAutomaticDirectoryURLs =
+                    previousExcludedAutomaticDirectoryURLs
+                throw error
+            }
         }
     }
 
@@ -529,6 +566,20 @@ final class SkillLibraryModel {
 
         do {
             let discoveredSkills = try await discoverer.discoverSkills(in: source)
+            guard let currentSource = self.source(for: sourceID) else {
+                return
+            }
+            guard
+                currentSource.directoryURL.standardizedFileURL
+                    == source.directoryURL.standardizedFileURL
+            else {
+                return
+            }
+            guard currentSource.isEnabled else {
+                sourceStates[sourceID] = .available
+                return
+            }
+
             let existingSkills = Dictionary(
                 uniqueKeysWithValues:
                     skills
@@ -552,6 +603,20 @@ final class SkillLibraryModel {
             sourceStates[sourceID] = .available
             reconcileSelection()
         } catch {
+            guard let currentSource = self.source(for: sourceID) else {
+                return
+            }
+            guard
+                currentSource.directoryURL.standardizedFileURL
+                    == source.directoryURL.standardizedFileURL
+            else {
+                return
+            }
+            guard currentSource.isEnabled else {
+                sourceStates[sourceID] = .available
+                return
+            }
+
             sourceStates[sourceID] = .unavailable
             throw error
         }
@@ -765,6 +830,34 @@ final class SkillLibraryModel {
         )
     }
 
+    private func withSerializedSourceMutation<Result>(
+        _ mutation: () async throws -> Result
+    ) async rethrows -> Result {
+        await beginSourceMutation()
+        defer { finishSourceMutation() }
+        return try await mutation()
+    }
+
+    private func beginSourceMutation() async {
+        guard sourceMutationIsRunning else {
+            sourceMutationIsRunning = true
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            sourceMutationWaiters.append(continuation)
+        }
+    }
+
+    private func finishSourceMutation() {
+        guard sourceMutationWaiters.isEmpty == false else {
+            sourceMutationIsRunning = false
+            return
+        }
+
+        sourceMutationWaiters.removeFirst().resume()
+    }
+
     private func automaticSourceCandidates() -> [SkillSource] {
         var discoveredDirectoryURLs: Set<URL> = []
 
@@ -805,9 +898,9 @@ final class SkillLibraryModel {
     private func recoverSource(
         _ sourceID: SkillSource.ID,
         at directoryURL: URL
-    ) async throws {
+    ) async throws -> SkillSource? {
         guard let sourceIndex = sources.firstIndex(where: { $0.id == sourceID }) else {
-            return
+            return nil
         }
 
         let previousSource = sources[sourceIndex]
@@ -846,17 +939,9 @@ final class SkillLibraryModel {
         }
 
         guard previousSource.isEnabled, discoverer != nil else {
-            return
+            return nil
         }
-
-        do {
-            try await rescanSource(sourceID)
-        } catch {
-            report(
-                error,
-                title: "Unable to Scan \(previousSource.displayName)"
-            )
-        }
+        return previousSource
     }
 
     private func restoreSourceAccess(

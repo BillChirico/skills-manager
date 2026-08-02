@@ -244,12 +244,19 @@ designed and reviewed helper boundary.
 Configured source URLs and durable automatic-folder exclusions are persisted
 together as one `SkillSourceConfiguration` document in `sources.json` under
 Application Support, written atomically so a source removal and its exclusion
-land in the same write. The JSON store creates an owner-only directory and file
-(`0700`/`0600`) and still decodes a legacy top-level source array into an empty
-exclusion set. Existing legacy bookmark data may still decode, but production
-composition no longer creates or relies on security-scoped bookmarks. Rollbacks
-re-resolve sources by stable `SkillSource.ID` after every `await`, never by a
-possibly stale array index.
+land in the same write. The JSON store tightens the directory to `0700`, writes
+an owner-only `0600` temporary file, and atomically renames it only after every
+fallible permission step succeeds; a thrown save therefore never follows an
+already-committed configuration. It still decodes a legacy top-level source
+array into an empty exclusion set.
+
+Source-configuration mutations are serialized across their persistence commit
+or rollback because MainActor methods are reentrant at an `await`. The boundary
+is released before post-commit filesystem scans so Settings actions do not wait
+for discovery. A scan re-resolves its source after discovery and publishes only
+when the ID still exists with the same standardized URL and enabled state.
+Existing legacy bookmark data may still decode, but production composition no
+longer creates or relies on security-scoped bookmarks.
 
 The library title reports the selected scope and item count. Toolbar actions keep
 discovery and Settings separate from sort/search controls. Static content uses

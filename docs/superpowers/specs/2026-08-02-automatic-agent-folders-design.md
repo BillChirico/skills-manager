@@ -30,9 +30,11 @@ adding that folder again opts it back into the library.
 directory URLs. `SkillSourceStore` gains configuration load/save requirements
 with source-only default implementations so existing conformers remain valid.
 `JSONSkillSourceStore` writes the configuration as one owner-only JSON document,
-making source removal and opt-out atomic. It continues decoding the legacy
-top-level source array and preserves exclusions when callers use the source-only
-API.
+making source removal and opt-out atomic. The store applies owner-only
+permissions to a same-directory temporary file before atomically renaming it,
+so a failed pre-commit step leaves the last good configuration intact. It
+continues decoding the legacy top-level source array and preserves exclusions
+when callers use the source-only API.
 
 The normalized configured URLs are removed from the exclusion set during
 restore. This repairs an inconsistent or manually edited configuration in favor
@@ -53,8 +55,10 @@ bookmark restoration remains unchanged for legacy records.
 
 Automatic additions use the existing restore error surface. A configuration
 load or save failure reports `Unable to Restore Directories` and never claims an
-unpersisted automatic source. Add and remove mutations snapshot the exclusion
-set alongside existing UI state and restore both after a failed atomic save.
+unpersisted automatic source. Source-configuration mutations are serialized
+across the persistence commit or rollback so a failing operation cannot restore
+state over a later successful mutation. The boundary is released before scans,
+which revalidate the source after discovery before publishing results.
 
 ## Testing
 
@@ -67,7 +71,9 @@ Swift Testing regressions cover:
 - durable removal across a fresh model instance;
 - manual re-add clearing the opt-out;
 - custom removal not creating an opt-out; and
-- rollback of source and exclusion state after a failed save.
+- rollback of source and exclusion state after a failed save;
+- serialized overlapping mutations; and
+- failed commits preserving the last good owner-only file without temp leaks.
 
 ## Documentation
 

@@ -291,6 +291,66 @@ struct SkillLibraryModelTests {
         #expect(source == persistedSource)
     }
 
+    @Test("A persisted folder clears a stale automatic-folder exclusion")
+    func restoreReconcilesExclusionForPersistedFolder() async throws {
+        let homeDirectory = URL(
+            filePath: "/Users/reviewer",
+            directoryHint: .isDirectory
+        )
+        let claudeDirectory = URL(
+            filePath: "/Users/reviewer/.claude/skills",
+            directoryHint: .isDirectory
+        )
+        let persistedSource = SkillSource(
+            name: "Claude Skills",
+            directoryURL: claudeDirectory,
+            agent: .claudeCode
+        )
+        let store = MemorySourceStore(
+            sources: [persistedSource],
+            excludedAutomaticDirectoryURLs: [claudeDirectory]
+        )
+        let model = makeModel(
+            sourceStore: store,
+            homeDirectory: homeDirectory,
+            directoryExists: { _ in true }
+        )
+
+        await model.restoreSources()
+
+        #expect(model.sources == [persistedSource])
+        #expect(
+            await store.loadConfiguration()
+                .excludedAutomaticDirectoryURLs.isEmpty
+        )
+    }
+
+    @Test("A failed automatic-folder save does not publish the new folder")
+    func failedRestoreSaveDoesNotPublishAutomaticFolder() async {
+        let homeDirectory = URL(
+            filePath: "/Users/reviewer",
+            directoryHint: .isDirectory
+        )
+        let cursorDirectory = URL(
+            filePath: "/Users/reviewer/.cursor/skills",
+            directoryHint: .isDirectory
+        )
+        let store = FailOnceSourceStore()
+        let model = makeModel(
+            sourceStore: store,
+            homeDirectory: homeDirectory,
+            directoryExists: {
+                $0.standardizedFileURL == cursorDirectory.standardizedFileURL
+            }
+        )
+
+        await model.restoreSources()
+
+        #expect(model.sources.isEmpty)
+        #expect(await store.loadConfiguration() == SkillSourceConfiguration())
+        #expect(model.presentedError?.title == "Unable to Restore Directories")
+    }
+
     @Test("An unavailable account home suppresses automatic folder detection")
     func restoreWithoutHomeDoesNotAddAutomaticFolders() async {
         let store = MemorySourceStore()
@@ -355,6 +415,31 @@ struct SkillLibraryModelTests {
         #expect(rescannedSkill.availableVersion == "2.0.0")
         #expect(rescannedSkill.isEnabled == false)
         #expect(model.selectedSkillIDs == [existingSkill.id])
+    }
+
+    @Test("A rescan does not publish results after its source is removed")
+    func rescanDoesNotPublishAfterSourceRemoval() async throws {
+        let source = SkillSource(
+            name: "Team Skills",
+            directoryURL: URL(filePath: "/skills/team")
+        )
+        let discoverer = SuspendingDiscoverer()
+        let model = SkillLibraryModel(
+            sources: [source],
+            sourceStore: MemorySourceStore(sources: [source]),
+            discoverer: discoverer
+        )
+
+        let scan = Task { @MainActor in
+            try await model.rescanSource(source.id)
+        }
+        await discoverer.waitUntilDiscoveryStarted()
+        try await model.removeSource(source.id)
+        await discoverer.resumeDiscovery()
+        try await scan.value
+
+        #expect(model.sources.isEmpty)
+        #expect(model.skills.isEmpty)
     }
 
     @Test(
@@ -669,6 +754,40 @@ struct SkillLibraryModelTests {
         #expect(restoredSource.directoryURL == geminiDirectory)
     }
 
+    @Test("A failed manual re-add restores the automatic-folder exclusion")
+    func failedManualAddRestoresAutomaticFolderExclusion() async throws {
+        let homeDirectory = URL(
+            filePath: "/Users/reviewer",
+            directoryHint: .isDirectory
+        )
+        let geminiDirectory = URL(
+            filePath: "/Users/reviewer/.gemini/skills",
+            directoryHint: .isDirectory
+        )
+        let store = FailOnceSourceStore(
+            excludedAutomaticDirectoryURLs: [geminiDirectory]
+        )
+        let model = makeModel(
+            sourceStore: store,
+            homeDirectory: homeDirectory,
+            directoryExists: {
+                $0.standardizedFileURL == geminiDirectory.standardizedFileURL
+            }
+        )
+        await model.restoreSources()
+
+        await #expect(throws: FailOnceSourceStore.SaveError.self) {
+            try await model.addSource(at: geminiDirectory, agent: .gemini)
+        }
+
+        let savedConfiguration = await store.loadConfiguration()
+        #expect(model.sources.isEmpty)
+        #expect(
+            savedConfiguration.excludedAutomaticDirectoryURLs
+                == [geminiDirectory]
+        )
+    }
+
     @Test("Removing a custom folder does not create an automatic-folder exclusion")
     func removingCustomFolderDoesNotCreateExclusion() async throws {
         let customSource = SkillSource(
@@ -747,38 +866,64 @@ struct SkillLibraryModelTests {
         #expect(model.sources.first?.isEnabled == true)
     }
 
-    @Test("A failed pause rolls back after the folder list is reordered")
-    func rollsBackFailedPauseAfterConcurrentRemoval() async throws {
-        let firstSource = SkillSource(
-            name: "Alpha Skills",
-            directoryURL: URL(filePath: "/skills/alpha")
+    @Test("A failed source mutation cannot roll back a later mutation")
+    func serializesSourceMutationsAcrossPersistence() async throws {
+        let homeDirectory = URL(
+            filePath: "/Users/reviewer",
+            directoryHint: .isDirectory
         )
-        let pausedSource = SkillSource(
-            name: "Beta Skills",
-            directoryURL: URL(filePath: "/skills/beta")
+        let automaticSource = SkillSource(
+            name: "Cursor Skills",
+            directoryURL: URL(
+                filePath: "/Users/reviewer/.cursor/skills",
+                directoryHint: .isDirectory
+            ),
+            agent: .cursor
         )
-        let store = InterruptingSourceStore(sources: [firstSource, pausedSource])
+        let customDirectory = URL(
+            filePath: "/skills/custom",
+            directoryHint: .isDirectory
+        )
+        let store = SuspendingFailOnceSourceStore(sources: [automaticSource])
         let model = SkillLibraryModel(
-            sources: [firstSource, pausedSource],
+            sources: [automaticSource],
             sourceStore: store,
             bookmarker: StubBookmarker(),
-            sourceAccess: StubSourceAccess()
+            sourceAccess: StubSourceAccess(),
+            homeDirectory: homeDirectory
         )
 
-        #expect(model.sources.map(\.displayName) == ["Alpha Skills", "Beta Skills"])
-
-        // The removal lands while the pause is suspended on its failing save, so
-        // the index the pause captured no longer addresses the folder it targeted.
-        await store.interruptFirstSave {
-            try await model.removeSource(firstSource.id)
+        let removal = Task { @MainActor in
+            try await model.removeSource(automaticSource.id)
+        }
+        await store.waitUntilFirstSaveStarted()
+        let addition = Task { @MainActor in
+            try await model.addSource(at: customDirectory)
         }
 
-        await #expect(throws: InterruptingSourceStore.SaveError.self) {
-            try await model.setSourceEnabled(false, sourceID: pausedSource.id)
+        // Give an incorrectly reentrant implementation ample opportunity to
+        // persist the addition before the first save is released.
+        for _ in 0..<100 where await store.saveCount < 2 {
+            await Task.yield()
         }
+        await store.failFirstSave()
 
-        #expect(model.sources.map(\.id) == [pausedSource.id])
-        #expect(model.sources.first?.isEnabled == true)
+        await #expect(throws: SuspendingFailOnceSourceStore.SaveError.self) {
+            try await removal.value
+        }
+        try await addition.value
+
+        let expectedDirectoryURLs = Set([
+            automaticSource.directoryURL,
+            customDirectory,
+        ])
+        let savedConfiguration = await store.loadConfiguration()
+        #expect(Set(model.sources.map(\.directoryURL)) == expectedDirectoryURLs)
+        #expect(
+            Set(savedConfiguration.sources.map(\.directoryURL))
+                == expectedDirectoryURLs
+        )
+        #expect(savedConfiguration.excludedAutomaticDirectoryURLs.isEmpty)
     }
 
     @Test("Updating a skill runs the CLI and rescans configured directories")
@@ -982,11 +1127,11 @@ private actor MemorySourceStore: SkillSourceStore {
         configuration.sources = sources
     }
 
-    func loadConfiguration() -> SkillSourceConfiguration {
+    func loadConfiguration() async -> SkillSourceConfiguration {
         configuration
     }
 
-    func save(_ configuration: SkillSourceConfiguration) {
+    func save(_ configuration: SkillSourceConfiguration) async {
         self.configuration = configuration
     }
 }
@@ -997,8 +1142,14 @@ private actor FailOnceSourceStore: SkillSourceStore {
     private var configuration: SkillSourceConfiguration
     private var shouldFailNextSave = true
 
-    init(sources: [SkillSource]) {
-        self.configuration = SkillSourceConfiguration(sources: sources)
+    init(
+        sources: [SkillSource] = [],
+        excludedAutomaticDirectoryURLs: Set<URL> = []
+    ) {
+        self.configuration = SkillSourceConfiguration(
+            sources: sources,
+            excludedAutomaticDirectoryURLs: excludedAutomaticDirectoryURLs
+        )
     }
 
     func loadSources() -> [SkillSource] {
@@ -1006,7 +1157,7 @@ private actor FailOnceSourceStore: SkillSourceStore {
     }
 
     func save(_ sources: [SkillSource]) throws {
-        try save(
+        try saveConfiguration(
             SkillSourceConfiguration(
                 sources: sources,
                 excludedAutomaticDirectoryURLs:
@@ -1015,11 +1166,17 @@ private actor FailOnceSourceStore: SkillSourceStore {
         )
     }
 
-    func loadConfiguration() -> SkillSourceConfiguration {
+    func loadConfiguration() async -> SkillSourceConfiguration {
         configuration
     }
 
-    func save(_ configuration: SkillSourceConfiguration) throws {
+    func save(_ configuration: SkillSourceConfiguration) async throws {
+        try saveConfiguration(configuration)
+    }
+
+    private func saveConfiguration(
+        _ configuration: SkillSourceConfiguration
+    ) throws {
         if shouldFailNextSave {
             shouldFailNextSave = false
             throw SaveError()
@@ -1041,44 +1198,109 @@ private actor FailingSaveSourceStore: SkillSourceStore {
     }
 }
 
-/// Runs one interruption inside the next `save`, then fails that save. Later
-/// saves succeed, so the interruption can mutate the library while the
-/// interrupted caller is still suspended.
-private actor InterruptingSourceStore: SkillSourceStore {
+private actor SuspendingFailOnceSourceStore: SkillSourceStore {
     struct SaveError: Error {}
 
-    private var sources: [SkillSource]
-    private var interruption: (@MainActor @Sendable () async throws -> Void)?
+    private var configuration: SkillSourceConfiguration
+    private var firstSaveContinuation: CheckedContinuation<Void, Never>?
+    private var firstSaveStartWaiters: [CheckedContinuation<Void, Never>] = []
+    private var shouldReleaseFirstSave = false
+    private(set) var saveCount = 0
 
     init(sources: [SkillSource] = []) {
-        self.sources = sources
-    }
-
-    func interruptFirstSave(
-        with interruption: @escaping @MainActor @Sendable () async throws -> Void
-    ) {
-        self.interruption = interruption
+        self.configuration = SkillSourceConfiguration(sources: sources)
     }
 
     func loadSources() -> [SkillSource] {
-        sources
+        configuration.sources
     }
 
     func save(_ sources: [SkillSource]) async throws {
-        guard let interruption else {
-            self.sources = sources
+        try await save(
+            SkillSourceConfiguration(
+                sources: sources,
+                excludedAutomaticDirectoryURLs:
+                    configuration.excludedAutomaticDirectoryURLs
+            )
+        )
+    }
+
+    func loadConfiguration() async -> SkillSourceConfiguration {
+        configuration
+    }
+
+    func save(_ configuration: SkillSourceConfiguration) async throws {
+        saveCount += 1
+        guard saveCount == 1 else {
+            self.configuration = configuration
             return
         }
 
-        self.interruption = nil
-        try await interruption()
+        let waiters = firstSaveStartWaiters
+        firstSaveStartWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        await withCheckedContinuation { continuation in
+            if shouldReleaseFirstSave {
+                continuation.resume()
+            } else {
+                firstSaveContinuation = continuation
+            }
+        }
         throw SaveError()
+    }
+
+    func waitUntilFirstSaveStarted() async {
+        guard saveCount == 0 else {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            firstSaveStartWaiters.append(continuation)
+        }
+    }
+
+    func failFirstSave() {
+        guard let firstSaveContinuation else {
+            shouldReleaseFirstSave = true
+            return
+        }
+
+        self.firstSaveContinuation = nil
+        firstSaveContinuation.resume()
     }
 }
 
 private struct EmptyDiscoverer: SkillDiscovering {
     func discoverSkills(in source: SkillSource) async throws -> [AgentSkill] {
         []
+    }
+}
+
+private actor SuspendingDiscoverer: SkillDiscovering {
+    private var discoveryContinuation: CheckedContinuation<Void, Never>?
+
+    func discoverSkills(in source: SkillSource) async throws -> [AgentSkill] {
+        await withCheckedContinuation { continuation in
+            discoveryContinuation = continuation
+        }
+        return [
+            AgentSkill(
+                name: "Late Skill",
+                directoryURL: source.directoryURL.appending(path: "late"),
+                sourceID: source.id
+            )
+        ]
+    }
+
+    func waitUntilDiscoveryStarted() async {
+        while discoveryContinuation == nil {
+            await Task.yield()
+        }
+    }
+
+    func resumeDiscovery() {
+        discoveryContinuation?.resume()
+        discoveryContinuation = nil
     }
 }
 

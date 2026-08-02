@@ -114,13 +114,14 @@ output, or user-specific absolute paths. Keep process standard input, output,
 and error disconnected unless a separately reviewed UI securely presents a
 bounded diagnostic.
 
-When a source mutation rolls back after a failed save, re-resolve the target by
-`SkillSource.ID` inside the `catch`. An index captured before the `await` can be
-stale, because awaiting the save yields the main actor and lets another mutation
-reorder or shrink `sources`. The same rule applies to automatic-folder
-exclusions: snapshot `excludedAutomaticDirectoryURLs` before the mutation and
-restore that snapshot in the `catch`, never recompute it from the failed
-in-memory state. Never widen the permissions of the store file.
+Serialize source-configuration mutations across their persistence commit or
+rollback; MainActor isolation alone is reentrant across an `await`. Release that
+mutation boundary before post-commit filesystem scans, and make each scan
+revalidate the source ID, enabled state, and standardized directory URL after
+discovery returns. When a source mutation rolls back, re-resolve its target by
+`SkillSource.ID` and restore the snapshotted automatic-folder exclusions. Write
+source configuration to an owner-only temporary file and set permissions before
+the atomic rename, so no fallible permission step remains after the commit.
 
 When the account home is available, the abbreviated `~/…` display path keeps the
 account name off screen. Do not pass a raw absolute path to a tooltip, label, or
