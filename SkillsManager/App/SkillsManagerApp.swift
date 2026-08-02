@@ -13,12 +13,15 @@ struct SkillsManagerApp: App {
                 for: .applicationSupportDirectory,
                 in: .userDomainMask
             ).first.map {
-                JSONSkillSourceStore(
-                    fileURL:
-                        $0
-                        .appending(path: "ai.volvox.SkillsManager", directoryHint: .isDirectory)
-                        .appending(path: "sources.json", directoryHint: .notDirectory)
-                )
+                let currentURL = $0.appending(path: "ai.volvox.SkillsManager/sources.json")
+                let oldURL = FileManager.default.homeDirectoryForCurrentUser
+                    .appending(path: "Library/Containers/ai.volvox.SkillsManager/Data/Library/Application Support/ai.volvox.SkillsManager/sources.json")
+                if !FileManager.default.fileExists(atPath: currentURL.path),
+                   FileManager.default.fileExists(atPath: oldURL.path) {
+                    try? FileManager.default.createDirectory(at: currentURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try? FileManager.default.copyItem(at: oldURL, to: currentURL)
+                }
+                return JSONSkillSourceStore(fileURL: currentURL)
             }
 
         _libraryModel = State(
