@@ -74,6 +74,10 @@ hand-off when full Xcode is available. If Xcode is unavailable, run
 - Send every folder add, enable, relocate, or remove mutation through
   `SkillLibraryModel` so security-scoped access, bookmarks, persistence, and
   rollback remain intact.
+- Open Discover on the skills.sh download leaderboard, and order both the
+  leaderboard and search results with `CatalogSkillSorter.byDownloads`. A search
+  response arrives in relevance order, so skipping the sorter silently changes
+  the ranking the product promises.
 
 ## Testing conventions
 
@@ -120,6 +124,55 @@ accessibility string that renders next to an available abbreviation.
 `UserHomeDirectory` reads the account home from the password database, which
 yields a path and never access to the files beneath it. If that lookup fails,
 leave persisted paths un-abbreviated instead of guessing at the account home.
+
+### Remote catalog input
+
+Never execute a command sourced from skills.sh, and never hand catalog text to a
+shell, `Process`, `NSAppleScript`, or `NSWorkspace.open` for a non-`https` URL.
+The install command in the detail view exists to be read and copied. Skills
+Manager installs by downloading files over HTTPS and copying them; a spawned
+`npx` would both execute arbitrary remote code and write outside the user's
+directory grants. UI copy must distinguish that install-time behavior from later
+use: an installed `SKILL.md` is instructions that an agent may follow with its
+own permissions, so users must be told to review it before use.
+
+Every field on `CatalogSkill` is untrusted. Route each one through
+`CatalogIdentifier` before it becomes a URL path component
+(`validatedPathComponent`) or a command argument (`validatedArgument`, which also
+rejects a leading `-` so a slug cannot be read as a flag). A value that fails
+validation makes the skill non-installable; it must not degrade into an
+unvalidated fallback. Reject dot-prefixed installation slugs because the library
+scanner skips hidden directories, while still allowing safe dot-prefixed
+repository path components such as `.github`. Re-check installability at the
+model boundary, and keep the filesystem installer responsible for refusing
+hidden destination names even if a future caller bypasses the catalog UI. Build
+`SkillInstallCommand` as a program plus an argument vector, never as one
+interpolated string.
+
+Repository tree paths are remote input too. `GitHubSkillPackageFetcher` drops any
+entry containing an empty, `.`, or `..` component before it reaches a
+`raw.githubusercontent.com` URL, in addition to the installer's own path checks.
+
+Treat text extracted from an installed `SKILL.md` as untrusted presentation
+input. Its library overview must remain non-interactive. Markdown styling may be
+parsed only when every link attribute is stripped before rendering; never allow
+a manifest-supplied destination to become clickable. Any intentional external
+navigation must be a separately constructed, validated `https` action.
+
+All catalog, repository-tree, and raw-file bodies must use the bounded streaming
+HTTP loader. Do not replace a streaming ceiling with a size check that runs only
+after `URLSession` has buffered the response. Keep skills.sh responses capped at
+8 MiB, keep GitHub recursive tree responses capped at 8 MiB, and keep packages
+capped at 200 files and 10 MiB aggregate. Pass the remaining aggregate byte
+budget to each raw-file request so no individual response can cross the package
+ceiling.
+
+Resolve GitHub `HEAD` exactly once per package fetch and use the resulting commit
+SHA for both recursive tree enumeration and every raw-content URL. Select a
+nested manifest only when its immediate parent directory matches the requested
+slug. A root `SKILL.md` is eligible only when it is the repository's sole
+manifest and the validated repository name exactly matches that slug; otherwise
+fail closed with no manifest fallback.
 
 ## Change checklist
 

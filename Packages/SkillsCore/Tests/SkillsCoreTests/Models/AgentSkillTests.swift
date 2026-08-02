@@ -4,6 +4,35 @@ import Testing
 @testable import SkillsCore
 
 struct AgentSkillTests {
+    @Test("Overview Markdown keeps styling but strips every untrusted link destination")
+    func stripsOverviewLinks() {
+        let source = SkillSource(
+            name: "Local",
+            directoryURL: URL(filePath: "/skills")
+        )
+        let skill = AgentSkill(
+            name: "Untrusted",
+            summary: "Summary",
+            directoryURL: source.directoryURL.appending(path: "untrusted"),
+            sourceID: source.id,
+            overview:
+                """
+                **Review** [HTTPS](https://example.com), \
+                [script](javascript:alert('owned')), and \
+                [file](file:///etc/passwd).
+                """
+        )
+
+        let overview = skill.attributedOverview
+
+        #expect(
+            String(overview.characters)
+                == "Review HTTPS, script, and file."
+        )
+        #expect(overview.runs.allSatisfy { $0.link == nil })
+        #expect(overview.runs.contains { $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true })
+    }
+
     @Test("The same discovered skill keeps its identity across scans")
     func stableIdentityAcrossScans() {
         let sourceID = UUID()

@@ -31,8 +31,7 @@ public struct FileSystemSkillPackageInstaller: SkillPackageInstalling {
         let directoryName = directoryName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard
             directoryName.isEmpty == false,
-            directoryName != ".",
-            directoryName != "..",
+            directoryName.hasPrefix(".") == false,
             directoryName.contains("/") == false,
             directoryName.contains("\\") == false
         else {

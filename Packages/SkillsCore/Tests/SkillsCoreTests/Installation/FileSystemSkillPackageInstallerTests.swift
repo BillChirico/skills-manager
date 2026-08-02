@@ -74,6 +74,29 @@ struct FileSystemSkillPackageInstallerTests {
         )
     }
 
+    @Test("Installation rejects a hidden skill directory")
+    func rejectsHiddenDirectoryName() throws {
+        let root = makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let package = SkillPackage(
+            skillID: "example/skills/hidden",
+            files: [SkillPackageFile(path: "SKILL.md", contents: Data("safe".utf8))]
+        )
+
+        #expect(throws: SkillPackageInstallError.invalidDirectoryName) {
+            try FileSystemSkillPackageInstaller().install(
+                package,
+                directoryName: ".hidden",
+                into: root
+            )
+        }
+        #expect(
+            FileManager.default.fileExists(
+                atPath: root.appending(path: ".hidden").path
+            ) == false
+        )
+    }
+
     @Test("Installation never overwrites an existing skill directory")
     func preservesExistingDirectory() throws {
         let root = makeTemporaryDirectory()
