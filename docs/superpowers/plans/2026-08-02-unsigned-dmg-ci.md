@@ -31,7 +31,7 @@
 - Consumes: `SkillsManager.xcodeproj`, shared `SkillsManager` archive scheme, and standard macOS command-line tools.
 - Produces: `scripts/build-unsigned-dmg.sh [output-path]` and `scripts/verify-unsigned-dmg.sh [dmg-path]`, both defaulting to `build/release/SkillsManager-unsigned.dmg` relative to the repository root.
 
-- [ ] **Step 1: Write the failing packaging behavior test**
+- [x] **Step 1: Write the failing packaging behavior test**
 
 Create a Bash test that gives the scripts a temporary `PATH` containing faithful filesystem fakes for `xcodebuild`, `ditto`, `plutil`, and `hdiutil`. The fake archive creates `SkillsManager.app/Contents/MacOS/SkillsManager` and `Info.plist`; fake image creation snapshots the staged source folder; fake attach restores that snapshot at the requested mount point. Execute both production scripts and assert these independently derived outcomes:
 
@@ -49,7 +49,7 @@ test -f "$fake_log/detached"
 
 Set `TMPDIR` to a test-owned directory and fail if either production script leaves a `skills-manager-dmg-*` directory behind. This catches a missing archive, wrong build mode, accidental signing, malformed installer layout, omitted detach, and incomplete cleanup.
 
-- [ ] **Step 2: Run the new test and verify RED**
+- [x] **Step 2: Run the new test and verify RED**
 
 Run from the repository root:
 
@@ -59,7 +59,7 @@ bash Tests/PackagingTests/unsigned-dmg.test.sh
 
 Expected: nonzero exit because `scripts/build-unsigned-dmg.sh` does not exist.
 
-- [ ] **Step 3: Implement the archive and DMG builder**
+- [x] **Step 3: Implement the archive and DMG builder**
 
 Create `scripts/build-unsigned-dmg.sh` with strict mode. Resolve the repository from `BASH_SOURCE`, normalize a relative output beneath the repository root, require the four macOS tools, and create a private temporary workspace. Run this exact archive contract:
 
@@ -87,7 +87,7 @@ hdiutil create \
 
 The EXIT/INT/TERM trap must delete only the exact `mktemp` workspace.
 
-- [ ] **Step 4: Implement mounted-image verification**
+- [x] **Step 4: Implement mounted-image verification**
 
 Create `scripts/verify-unsigned-dmg.sh` with strict mode. Require a regular DMG, run `hdiutil verify`, create a private mount point, and attach with:
 
@@ -97,7 +97,7 @@ hdiutil attach -nobrowse -readonly -mountpoint "$mount_point" "$dmg_path"
 
 Check `Skills Manager.app`, its executable and `Info.plist`, absence of `_CodeSignature`, and an `Applications` symlink whose target is exactly `/Applications`. The cleanup trap must detach an attached image; detach failure changes the result to failure and leaves the mount point intact rather than recursively deleting mounted contents.
 
-- [ ] **Step 5: Run the packaging test and verify GREEN**
+- [x] **Step 5: Run the packaging test and verify GREEN**
 
 ```bash
 bash Tests/PackagingTests/unsigned-dmg.test.sh
@@ -108,7 +108,7 @@ bash -n Tests/PackagingTests/unsigned-dmg.test.sh
 
 Expected: all commands exit 0, the test prints its success message, and no temporary test directories remain.
 
-- [ ] **Step 6: Commit the packaging boundary**
+- [x] **Step 6: Commit the packaging boundary**
 
 ```bash
 git add Tests/PackagingTests/unsigned-dmg.test.sh scripts/build-unsigned-dmg.sh scripts/verify-unsigned-dmg.sh
@@ -125,7 +125,7 @@ git commit -m "feat(ci): add tested unsigned DMG packaging (VOLVOX-28)"
 - Consumes: the scripts from Task 1 and the existing CI test job.
 - Produces: `make packaging-test`, `make dmg`, `make verify-dmg`, and a directly downloadable `SkillsManager-unsigned.dmg` artifact on successful `main` pushes.
 
-- [ ] **Step 1: Add Make targets**
+- [x] **Step 1: Add Make targets**
 
 Set the overridable output once and expose focused targets:
 
@@ -146,7 +146,7 @@ verify-dmg:
 
 Add `packaging-test` to the prerequisites of `check` before the macOS app test.
 
-- [ ] **Step 2: Extend the existing CI job**
+- [x] **Step 2: Extend the existing CI job**
 
 After Swift linting, run `make packaging-test` on pull requests and main pushes. After the existing macOS app test, add main-push-only build and validation steps using this condition on every distribution step:
 
@@ -167,7 +167,7 @@ Upload the single already-compressed file without wrapping it in another archive
     archive: false
 ```
 
-- [ ] **Step 3: Validate the build interface and workflow syntax**
+- [x] **Step 3: Validate the build interface and workflow syntax**
 
 ```bash
 make packaging-test
@@ -177,7 +177,10 @@ git diff --check
 
 Expected: all commands exit 0. On a non-macOS host, do not run `make dmg` or `make verify-dmg`; record that the real `xcodebuild`/`hdiutil` integration path requires macOS and runs on the `macos-26` CI runner.
 
-- [ ] **Step 4: Commit CI wiring**
+Windows execution used the test script directly because GNU Make was
+unavailable; the script, `actionlint`, ShellCheck, and whitespace checks passed.
+
+- [x] **Step 4: Commit CI wiring**
 
 ```bash
 git add Makefile .github/workflows/ci.yml
@@ -197,7 +200,7 @@ git commit -m "ci: publish unsigned main-branch DMG (VOLVOX-28)"
 - Consumes: the commands, artifact path, trigger, and trust posture implemented in Tasks 1 and 2.
 - Produces: consistent user, contributor, architecture, and security guidance.
 
-- [ ] **Step 1: Update user-facing documentation**
+- [x] **Step 1: Update user-facing documentation**
 
 Add a `## Unsigned DMG artifacts` section to `README.md` that states:
 
@@ -211,15 +214,15 @@ macOS contributors can run make packaging-test, make dmg, and make verify-dmg.
 
 Describe downloading the file from the successful GitHub Actions run without recommending a Gatekeeper bypass.
 
-- [ ] **Step 2: Update agent and architecture documentation**
+- [x] **Step 2: Update agent and architecture documentation**
 
 Add the three Make commands and their host requirements to `AGENTS.md`; state that distribution steps remain main-push-only, unsigned, minimally permissioned, and SHA-pinned. Add matching concise reminders to `CLAUDE.md`. Add a CI/distribution section to `docs/ARCHITECTURE.md` describing the script/Make/workflow boundaries and the future signing insertion points.
 
-- [ ] **Step 3: Update the security record**
+- [x] **Step 3: Update the security record**
 
 Add an unsigned-build section to `docs/SECURITY.md` stating that Hardened Runtime does not authenticate an unsigned artifact, Gatekeeper may reject it, no signing secrets are present, and Developer ID signing plus Apple notarization require a separate security-reviewed workflow change.
 
-- [ ] **Step 4: Review documentation consistency**
+- [x] **Step 4: Review documentation consistency**
 
 ```bash
 rg -n "unsigned|notar|Gatekeeper|packaging-test|verify-dmg|SkillsManager-unsigned" README.md AGENTS.md CLAUDE.md docs/ARCHITECTURE.md docs/SECURITY.md
@@ -228,7 +231,7 @@ git diff --check
 
 Expected: every required document names the unsigned boundary consistently, and whitespace validation exits 0.
 
-- [ ] **Step 5: Commit documentation**
+- [x] **Step 5: Commit documentation**
 
 ```bash
 git add README.md AGENTS.md CLAUDE.md docs/ARCHITECTURE.md docs/SECURITY.md docs/superpowers/plans/2026-08-02-unsigned-dmg-ci.md
@@ -244,7 +247,7 @@ git commit -m "docs(ci): explain unsigned DMG delivery (VOLVOX-28)"
 - Consumes: Tasks 1 through 3 and the repository review policy.
 - Produces: a committed reviewable range, fresh validation evidence, and separate QA and Security review requests before PR creation.
 
-- [ ] **Step 1: Run all available verification**
+- [x] **Step 1: Run all available verification**
 
 On macOS with the required toolchain:
 

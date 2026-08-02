@@ -99,8 +99,9 @@ second archive. Open it and drag `Skills Manager.app` onto the included
 > before running the app; do not disable Gatekeeper.
 
 Download the DMG from the **Artifacts** area of a successful `main` branch CI
-run. Contributors can exercise the packaging orchestration anywhere Bash is
-available and can build and mount-check the real image on macOS with Xcode 26:
+run. Contributors can exercise the packaging orchestration anywhere Bash and
+Make are available and can build and mount-check the real image on macOS with
+Xcode 26:
 
 ```sh
 make packaging-test
