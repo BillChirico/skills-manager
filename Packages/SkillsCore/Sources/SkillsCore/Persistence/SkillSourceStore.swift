@@ -1,8 +1,60 @@
 import Foundation
 
+public struct SkillSourceConfiguration: Equatable, Sendable, Codable {
+    public var sources: [SkillSource]
+    public var excludedAutomaticDirectoryURLs: Set<URL>
+
+    public init(
+        sources: [SkillSource] = [],
+        excludedAutomaticDirectoryURLs: Set<URL> = []
+    ) {
+        self.sources = sources
+        self.excludedAutomaticDirectoryURLs = excludedAutomaticDirectoryURLs
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sources
+        case excludedAutomaticDirectoryURLs
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sources = try container.decode([SkillSource].self, forKey: .sources)
+        excludedAutomaticDirectoryURLs = Set(
+            try container.decodeIfPresent(
+                [URL].self,
+                forKey: .excludedAutomaticDirectoryURLs
+            ) ?? []
+        )
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sources, forKey: .sources)
+        try container.encode(
+            excludedAutomaticDirectoryURLs.sorted {
+                $0.path(percentEncoded: false) < $1.path(percentEncoded: false)
+            },
+            forKey: .excludedAutomaticDirectoryURLs
+        )
+    }
+}
+
 public protocol SkillSourceStore: Sendable {
     func loadSources() async throws -> [SkillSource]
     func save(_ sources: [SkillSource]) async throws
+    func loadConfiguration() async throws -> SkillSourceConfiguration
+    func save(_ configuration: SkillSourceConfiguration) async throws
+}
+
+public extension SkillSourceStore {
+    func loadConfiguration() async throws -> SkillSourceConfiguration {
+        SkillSourceConfiguration(sources: try await loadSources())
+    }
+
+    func save(_ configuration: SkillSourceConfiguration) async throws {
+        try await save(configuration.sources)
+    }
 }
 
 public actor JSONSkillSourceStore: SkillSourceStore {
@@ -20,16 +72,42 @@ public actor JSONSkillSourceStore: SkillSourceStore {
     }
 
     public func loadSources() throws -> [SkillSource] {
+        try loadConfiguration().sources
+    }
+
+    public func loadConfiguration() throws -> SkillSourceConfiguration {
         let fileManager = FileManager()
         guard fileManager.fileExists(atPath: fileURL.path) else {
-            return []
+            return SkillSourceConfiguration()
         }
 
         let data = try Data(contentsOf: fileURL)
-        return try JSONDecoder().decode([SkillSource].self, from: data)
+        let decoder = JSONDecoder()
+
+        if let configuration = try? decoder.decode(
+            SkillSourceConfiguration.self,
+            from: data
+        ) {
+            return configuration
+        }
+
+        return SkillSourceConfiguration(
+            sources: try decoder.decode([SkillSource].self, from: data)
+        )
     }
 
     public func save(_ sources: [SkillSource]) throws {
+        let configuration = try loadConfiguration()
+        try save(
+            SkillSourceConfiguration(
+                sources: sources,
+                excludedAutomaticDirectoryURLs:
+                    configuration.excludedAutomaticDirectoryURLs
+            )
+        )
+    }
+
+    public func save(_ configuration: SkillSourceConfiguration) throws {
         let fileManager = FileManager()
         try fileManager.createDirectory(
             at: fileURL.deletingLastPathComponent(),
@@ -39,7 +117,7 @@ public actor JSONSkillSourceStore: SkillSourceStore {
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(sources)
+        let data = try encoder.encode(configuration)
         try data.write(to: fileURL, options: .atomic)
 
         // An atomic write replaces the file, so permissions are applied afterwards.

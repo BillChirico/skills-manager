@@ -4,6 +4,103 @@ import Testing
 @testable import SkillsCore
 
 struct JSONSkillSourceStoreTests {
+    @Test("Saving a configuration preserves automatic-folder exclusions")
+    func savesAndLoadsConfiguration() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(
+            path: "SkillsCoreStoreTests-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = JSONSkillSourceStore(
+            fileURL: directory.appending(
+                path: "sources.json",
+                directoryHint: .notDirectory
+            )
+        )
+        let source = SkillSource(
+            name: "Claude Skills",
+            directoryURL: URL(filePath: "/skills/claude")
+        )
+        let excludedURL = URL(
+            filePath: "/skills/cursor",
+            directoryHint: .isDirectory
+        )
+        let configuration = SkillSourceConfiguration(
+            sources: [source],
+            excludedAutomaticDirectoryURLs: Set([excludedURL])
+        )
+
+        try await store.save(configuration)
+        let loaded = try await store.loadConfiguration()
+
+        #expect(loaded == configuration)
+    }
+
+    @Test("A legacy source array loads as a configuration without exclusions")
+    func loadsLegacySourceArray() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(
+            path: "SkillsCoreStoreTests-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let fileURL = directory.appending(
+            path: "sources.json",
+            directoryHint: .notDirectory
+        )
+        let source = SkillSource(
+            name: "Legacy Skills",
+            directoryURL: URL(filePath: "/skills/legacy")
+        )
+        try JSONEncoder().encode([source]).write(to: fileURL)
+        let store = JSONSkillSourceStore(fileURL: fileURL)
+
+        let loaded = try await store.loadConfiguration()
+
+        #expect(loaded.sources == [source])
+        #expect(loaded.excludedAutomaticDirectoryURLs.isEmpty)
+    }
+
+    @Test("Saving only sources preserves existing automatic-folder exclusions")
+    func sourceOnlySavePreservesExclusions() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(
+            path: "SkillsCoreStoreTests-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = JSONSkillSourceStore(
+            fileURL: directory.appending(
+                path: "sources.json",
+                directoryHint: .notDirectory
+            )
+        )
+        let excludedURL = URL(
+            filePath: "/skills/gemini",
+            directoryHint: .isDirectory
+        )
+        try await store.save(
+            SkillSourceConfiguration(
+                excludedAutomaticDirectoryURLs: Set([excludedURL])
+            )
+        )
+        let source = SkillSource(
+            name: "Team Skills",
+            directoryURL: URL(filePath: "/skills/team")
+        )
+
+        try await store.save([source])
+        let loaded = try await store.loadConfiguration()
+
+        #expect(loaded.sources == [source])
+        #expect(loaded.excludedAutomaticDirectoryURLs == Set([excludedURL]))
+    }
+
     @Test("Saving sources replaces and reloads the persisted collection")
     func savesAndLoadsSources() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(
@@ -74,8 +171,8 @@ struct JSONSkillSourceStoreTests {
             fileURL: directory.appending(path: "sources.json", directoryHint: .notDirectory)
         )
 
-        let loaded = try await store.loadSources()
+        let loaded = try await store.loadConfiguration()
 
-        #expect(loaded.isEmpty)
+        #expect(loaded == SkillSourceConfiguration())
     }
 }
