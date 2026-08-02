@@ -23,8 +23,9 @@ verification before `npx` runs.
 The release declares Node.js `>=22.20.0`. Its package manifest contains no
 `preinstall`, `install`, or `postinstall` script. Skills Manager additionally
 sets `NPM_CONFIG_IGNORE_SCRIPTS=true`, fixes the registry to
-`https://registry.npmjs.org/`, ignores user/global npm configuration, and invokes
-the binary with an explicit package selector:
+`https://registry.npmjs.org/`, ignores user/global npm configuration, sets
+`GIT_TERMINAL_PROMPT=0`, and invokes the binary with an explicit package
+selector:
 
 ```text
 npx --yes --package skills@1.5.21 -- skills <operation> ...
@@ -64,9 +65,11 @@ and positional skill filters, but no `--agent` selector. Its global path reads
 the shared lock and reinstalls through `add`. Calling it from a source-scoped app
 action could therefore mutate other agent directories. Skills Manager validates
 the selected source and skill, then fails before process launch with an
-actionable error. A reviewed reinstall is the safe refresh path until upstream
-adds an agent-scoped update contract. A published-package probe also confirmed
-that attempting `skills update --agent codex --global --yes` does not add an
+actionable error. Every row, detail, context-menu, and multi-select update
+surface is therefore inert `Reinstall Required` guidance, not an action; users
+must reinstall from a trusted source for a scoped refresh. A published-package
+probe also confirmed that attempting
+`skills update --agent codex --global --yes` does not add an
 agent boundary: `--agent` is ignored by the update parser and `codex` is treated
 as a positional skill-name filter.
 
@@ -92,9 +95,8 @@ metadata. Any incomplete or unsafe entry invalidates the entire check before
 
 Decoding uses a closed schema. The manager then writes only those validated
 fields, sorted and canonicalized, to `.agents/.skill-lock.json` inside a newly
-created `0700` disposable home; the lock is `0600`. A separate `0700` working
-directory contains a pre-created `0600` stdout file. The exact direct invocation
-is:
+created `0700` disposable home; the lock is `0600`. It also creates a separate
+`0700` working directory, but no stdout file. The exact direct invocation is:
 
 ```text
 npx --yes --package skills@1.5.21 -- skills check --global --yes
@@ -102,25 +104,25 @@ npx --yes --package skills@1.5.21 -- skills check --global --yes
 
 The existing environment allowlist is retained, except `HOME` points to the
 disposable home, `CODEX_HOME` points to its `.agents` directory, and `TMPDIR`
-points to an owner-only directory in the same disposable tree. No real
+points to an owner-only directory in the same disposable tree.
+`GIT_TERMINAL_PROMPT=0` prevents an interactive credential prompt. No real
 installation directory, project lock, inherited npm/Git configuration,
 credential variable, token, proxy secret, or unrelated parent variable is
 forwarded. The reviewed upstream path is directed into the disposable tree and
 receives no explicit path to a real skill installation; this process
 configuration is containment, not a filesystem sandbox. Standard input and
-error remain disconnected. The runner opens the owner-only stdout file before
-launch and gives one capture task sole ownership of reading and closing the
-pipe's nonblocking read descriptor. It caps the stream at 256 KiB; exceeding the
-cap stops the direct process and produces no availability result. No competing
-task closes that descriptor. Caller cancellation cancels and awaits the capture
-task. After direct-process exit, the runner allows one second for EOF, then
-cancels and awaits the capture task and fails closed if an inherited descendant
-writer still holds the pipe open.
+error remain disconnected. The runner captures stdout directly from an
+anonymous pipe into memory and gives one capture task sole ownership of reading
+and closing the pipe's nonblocking read descriptor. No `update-check.stdout` or
+other child-visible capture artifact is created. It caps the stream at 256 KiB;
+exceeding the cap stops the direct process and produces no availability result.
+No competing task closes that descriptor. Caller cancellation cancels and
+awaits the capture task. After direct-process exit, the runner allows one second
+for EOF, then cancels and awaits the capture task and fails closed if an
+inherited descendant writer still holds the pipe open.
 
-After a zero exit, the runner persists through the already-open file handle and
-returns those same bounded bytes. The parser never reopens the child-writable
-pathname, so replacing it cannot redirect a parent write or the parsed input.
-The bytes must be valid UTF-8. The parser strips only the reviewed ANSI
+After a zero exit, the runner returns those same bounded in-memory bytes. They
+must be valid UTF-8. The parser strips only the reviewed ANSI
 sequences and accepts only a complete known transcript: one header, every
 expected lock source exactly once, and then either a confirmed all-current line
 or consistent positive
@@ -128,29 +130,34 @@ found/update/summary counts with matching `Updating` and `Updated` lines. Unknow
 terminal controls or lines, unexpected or duplicate names and sources,
 failure/skip/deletion diagnostics, partial results, and any count mismatch fail
 closed. The result never exposes bare names as installation identity. The
-version-3 global lock can represent `--global --agent ... --copy` installs but
-records no per-agent destination list. The manager therefore maps every
-validated checked lock key into all five deduplicated fixed destinations under
-the resolved account home: `.agents/skills` (shared by Global and Codex),
-`.claude/skills`, `.cursor/skills`, `.copilot/skills`, and `.gemini/skills`, and
-maps the update-available subset through the same set. It cannot return a custom
-directory selected by lock or transcript text. Raw lock data and raw CLI output
-are never logged or presented.
+version-3 global lock records no per-agent destination identity. Its
+`skillFolderHash` identifies source-tree provenance for the remote comparison;
+it is not proof of the local contents or provenance of copies in other agent
+folders. The manager therefore maps every validated checked lock key only to the
+resolved account home's `.agents/skills/<validated-name>` file URL and maps the
+update-available subset through that same layout. It cannot truthfully assert
+status for a same-named Claude, Cursor, Copilot, Gemini, or custom-path copy.
+Raw lock data and raw CLI output are never logged or presented.
 
-Deferred removal covers the stdout file, working directory, canonical lock, and
-complete disposable home on success, launch failure, nonzero exit, timeout,
-cancellation, and parse failure. The availability result is applied only after
-restored sources have finished scanning. The model canonicalizes both result and
+Deferred removal covers the working directory, canonical lock, and complete
+disposable home on success, launch failure, nonzero exit, timeout, cancellation,
+and parse failure. The availability result is applied only after restored
+sources have finished scanning. The model canonicalizes both result and
 installed URLs and applies `.current` or `.available` only when one checked URL
-has exactly one installed match. A discovered installation at one of the five
-fixed built-in destinations can receive status; same-named custom-path copies,
-unchecked installations, and ambiguous duplicate canonical identities receive
+has exactly one installed match. Every other agent or custom-path copy,
+unchecked installation, and ambiguous duplicate canonical identity receives
 explicit `.unknown`, which suppresses stale legacy version badges and prevents
-an all-current claim. The normalized last result is reapplied after successful
-rescans, so newly discovered unchecked skills downgrade the overall state to
-partial. Cancellation and every error clear prior positives. This containment
-discovers availability only. It does not make the app's actual update action
-agent-scoped, so that action remains fail-closed as described above.
+an all-current claim. While a refresh is in flight, the last trustworthy badges
+and count remain visible; success atomically replaces them, while cancellation
+or failure clears them. Partial state reports checked and total counts, and an
+empty library returns to idle instead of all-current. Missing lock is a quiet
+unavailable state, and missing Node.js/`npx` is quiet unsupported; malformed
+input, failed execution, timeout, and invalid output still use the safe alert
+path. The normalized last result is reapplied after successful rescans, so newly
+discovered unchecked skills downgrade the overall state to partial. This
+containment discovers availability only. It does not make the app's actual
+update action agent-scoped, so that action remains fail-closed as described
+above.
 
 ## Automatic source discovery and persistence
 
@@ -224,11 +231,17 @@ the external Node/npm process requires executable, network, and standard agent
 directory access; restoring App Sandbox requires a separately reviewed helper
 design.
 
-## Accepted residual risk
+## Residual risk and pending decisions
 
 These controls deliberately do not claim a complete software-supply-chain or
 content sandbox:
 
+- **Residual Low — Security finding 2 (pending product decision):** after
+  launch-time source restoration, the app automatically starts the
+  network-capable availability probe when its prerequisites are present. There
+  is currently no consent prompt and no preference to disable that automatic
+  check. The manual toolbar control does not resolve this finding, and this
+  revision intentionally does not implement or imply an opt-in or opt-out.
 - The availability check intentionally executes a mutating, network-capable
   upstream path. Redirected homes, a scrubbed environment, bounded output, and
   deferred deletion of the disposable trees avoid giving that reviewed path an

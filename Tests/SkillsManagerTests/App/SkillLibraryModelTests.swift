@@ -282,7 +282,96 @@ struct SkillLibraryModelTests {
         #expect(checkedSkill.updateStatus == .current)
         #expect(uncheckedSkill.updateStatus == .unknown)
         #expect(uncheckedSkill.hasUpdate == false)
-        #expect(model.updateCheckState == .partial)
+        #expect(model.updateCheckState == .partial(checked: 1, total: 2))
+    }
+
+    @Test("A running refresh preserves the last trustworthy badges and count", .bug(id: 27))
+    func refreshPreservesAvailabilityUntilCompletion() async throws {
+        let source = SkillSource(
+            name: "Global",
+            directoryURL: URL(filePath: "/skills/global")
+        )
+        let skill = AgentSkill(
+            name: "Tracked",
+            summary: "Already known to have an update.",
+            updateStatus: .available,
+            directoryURL: source.directoryURL.appending(path: "tracked"),
+            sourceID: source.id
+        )
+        let manager = CancellableUpdateAvailabilityManager()
+        let model = SkillLibraryModel(
+            sources: [source],
+            skills: [skill],
+            skillManager: manager
+        )
+        let task = Task {
+            await model.refreshUpdateAvailability()
+        }
+        await manager.waitUntilCheckStarted()
+
+        #expect(model.updateCheckState == .checking)
+        #expect(model.skills.first?.updateStatus == .available)
+        #expect(model.updatesAvailableCount == 1)
+
+        task.cancel()
+        await task.value
+
+        #expect(model.updateCheckState == .idle)
+        #expect(model.skills.first?.updateStatus == .unknown)
+        #expect(model.updatesAvailableCount == 0)
+    }
+
+    @Test("The model-owned update task can be cancelled from persistent UI", .bug(id: 27))
+    func modelOwnedUpdateCheckCanBeCancelled() async {
+        let manager = CancellableUpdateAvailabilityManager()
+        let model = SkillLibraryModel(skillManager: manager)
+        let task = model.startUpdateAvailabilityRefresh()
+        await manager.waitUntilCheckStarted()
+
+        model.cancelUpdateAvailabilityRefresh()
+        await task.value
+
+        #expect(model.updateCheckState == .idle)
+    }
+
+    @Test("Completion copy announces update count and partial coverage", .bug(id: 27))
+    func updateCompletionAnnouncementIncludesCoverage() async {
+        let source = SkillSource(
+            name: "Shared",
+            directoryURL: URL(filePath: "/skills/shared")
+        )
+        let checked = AgentSkill(
+            name: "Checked",
+            summary: "Checked skill.",
+            directoryURL: source.directoryURL.appending(path: "checked"),
+            sourceID: source.id
+        )
+        let unchecked = AgentSkill(
+            name: "Unchecked",
+            summary: "Unchecked skill.",
+            directoryURL: source.directoryURL.appending(path: "unchecked"),
+            sourceID: source.id
+        )
+        let manager = UpdateAvailabilityManager(
+            result: .success(
+                SkillUpdateAvailability(
+                    checkedSkillDirectoryURLs: [checked.directoryURL],
+                    updateAvailableSkillDirectoryURLs: [checked.directoryURL]
+                )
+            )
+        )
+        let model = SkillLibraryModel(
+            sources: [source],
+            skills: [checked, unchecked],
+            skillManager: manager
+        )
+
+        await model.refreshUpdateAvailability()
+
+        #expect(
+            model.updateCheckCompletionAnnouncement
+                == "1 update available. 1 of 2 skills checked."
+        )
     }
 
     @Test("An empty lock never claims that an installed skill is current")
@@ -318,7 +407,78 @@ struct SkillLibraryModelTests {
         let uncheckedSkill = try #require(model.skills.first)
         #expect(uncheckedSkill.updateStatus == .unknown)
         #expect(uncheckedSkill.hasUpdate == false)
-        #expect(model.updateCheckState == .partial)
+        #expect(model.updateCheckState == .partial(checked: 0, total: 1))
+    }
+
+    @Test("An empty library is not reported as all current", .bug(id: 27))
+    func emptyLibraryReturnsToIdleAfterUpdateCheck() async {
+        let manager = UpdateAvailabilityManager(
+            result: .success(
+                SkillUpdateAvailability(
+                    checkedSkillDirectoryURLs: [],
+                    updateAvailableSkillDirectoryURLs: []
+                )
+            )
+        )
+        let model = SkillLibraryModel(skillManager: manager)
+
+        await model.refreshUpdateAvailability()
+
+        #expect(model.updateCheckState == .idle)
+        #expect(
+            model.updateCheckCompletionAnnouncement
+                == "Update check complete. No installed skills to check."
+        )
+    }
+
+    @Test("A missing lock is a quiet unavailable state", .bug(id: 27))
+    func missingLockDoesNotPresentAnAlert() async {
+        let manager = UpdateAvailabilityManager(
+            result: .cliFailure(.updateCheckLockMissing)
+        )
+        let model = SkillLibraryModel(skillManager: manager)
+
+        await model.refreshUpdateAvailability()
+
+        #expect(model.updateCheckState == .unavailable)
+        #expect(model.presentedError == nil)
+    }
+
+    @Test("A missing npx runtime is a quiet unsupported state", .bug(id: 27))
+    func missingNpxDoesNotPresentAnAlert() async {
+        let manager = UpdateAvailabilityManager(
+            result: .cliFailure(.npxNotFound)
+        )
+        let model = SkillLibraryModel(skillManager: manager)
+
+        await model.refreshUpdateAvailability()
+
+        #expect(model.updateCheckState == .unsupported)
+        #expect(model.presentedError == nil)
+    }
+
+    @Test("A model without lifecycle support is explicitly unsupported", .bug(id: 27))
+    func absentSkillManagerIsUnsupported() async throws {
+        let source = SkillSource(
+            name: "Legacy",
+            directoryURL: URL(filePath: "/skills/legacy")
+        )
+        let skill = AgentSkill(
+            name: "Legacy",
+            summary: "Carries stale version metadata.",
+            installedVersion: "1.0.0",
+            availableVersion: "2.0.0",
+            updateStatus: .available,
+            directoryURL: source.directoryURL.appending(path: "legacy"),
+            sourceID: source.id
+        )
+        let model = SkillLibraryModel(sources: [source], skills: [skill])
+
+        await model.refreshUpdateAvailability()
+
+        #expect(model.updateCheckState == .unsupported)
+        #expect(try #require(model.skills.first).updateStatus == .unknown)
+        #expect(model.presentedError == nil)
     }
 
     @Test("An update-only identity from an alternate manager fails closed")
@@ -398,7 +558,7 @@ struct SkillLibraryModelTests {
         #expect(model.skills.allSatisfy { $0.updateStatus == .unknown })
         #expect(model.skills.allSatisfy { $0.hasUpdate == false })
         #expect(model.updatesAvailableCount == 0)
-        #expect(model.updateCheckState == .partial)
+        #expect(model.updateCheckState == .partial(checked: 0, total: 2))
     }
 
     @Test("A fixed agent destination matches while a same-named custom skill stays unknown")
@@ -457,7 +617,7 @@ struct SkillLibraryModelTests {
         #expect(customSkill.updateStatus == .unknown)
         #expect(customSkill.hasUpdate == false)
         #expect(model.updatesAvailableCount == 1)
-        #expect(model.updateCheckState == .partial)
+        #expect(model.updateCheckState == .partial(checked: 1, total: 2))
     }
 
     @Test("A sole custom installation cannot match a stale global lock entry by name")
@@ -494,7 +654,7 @@ struct SkillLibraryModelTests {
         let customSkill = try #require(model.skills.first)
         #expect(customSkill.updateStatus == .unknown)
         #expect(customSkill.hasUpdate == false)
-        #expect(model.updateCheckState == .partial)
+        #expect(model.updateCheckState == .partial(checked: 0, total: 1))
     }
 
     @Test("An ambiguous update result clears positive claims and reports unavailable state")
@@ -608,7 +768,7 @@ struct SkillLibraryModelTests {
         )
         #expect(addedSkill.updateStatus == .unknown)
         #expect(addedSkill.hasUpdate == false)
-        #expect(model.updateCheckState == .partial)
+        #expect(model.updateCheckState == .partial(checked: 1, total: 2))
     }
 
     @Test("Restoring automatically adds and scans existing standard agent folders")
@@ -2233,6 +2393,7 @@ private actor UpdateAvailabilityManager: SkillManaging {
         case success(SkillUpdateAvailability)
         case failure
         case cancelled
+        case cliFailure(SkillsCLIError)
     }
 
     struct CheckError: LocalizedError {
@@ -2257,6 +2418,35 @@ private actor UpdateAvailabilityManager: SkillManaging {
             throw CheckError()
         case .cancelled:
             throw SkillsCLIError.commandCancelled
+        case .cliFailure(let error):
+            throw error
+        }
+    }
+
+    func install(_ skill: CatalogSkill, into source: SkillSource) async throws -> URL {
+        source.directoryURL.appending(path: skill.slug, directoryHint: .isDirectory)
+    }
+
+    func update(_ skill: AgentSkill, in source: SkillSource) async throws {}
+
+    func remove(_ skill: AgentSkill, from source: SkillSource) async throws {}
+}
+
+private actor CancellableUpdateAvailabilityManager: SkillManaging {
+    private var checkStarted = false
+
+    func checkForUpdates() async throws -> SkillUpdateAvailability {
+        checkStarted = true
+        try await Task.sleep(for: .seconds(30))
+        return SkillUpdateAvailability(
+            checkedSkillDirectoryURLs: [],
+            updateAvailableSkillDirectoryURLs: []
+        )
+    }
+
+    func waitUntilCheckStarted() async {
+        while checkStarted == false {
+            await Task.yield()
         }
     }
 

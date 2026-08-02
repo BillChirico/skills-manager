@@ -70,6 +70,7 @@ struct SkillsCLIManagerTests {
         #expect(command.environment["DISABLE_TELEMETRY"] == "1")
         #expect(command.environment["DO_NOT_TRACK"] == "1")
         #expect(command.environment["GIT_CONFIG_GLOBAL"] == "/dev/null")
+        #expect(command.environment["GIT_TERMINAL_PROMPT"] == "0")
         #expect(
             command.environment["NPM_CONFIG_GLOBALCONFIG"]
                 == command.currentDirectoryURL.appending(
@@ -735,7 +736,7 @@ struct SkillsCLIManagerTests {
             in: homeDirectory,
             skillName: "swift-testing-pro"
         )
-        #expect(expectedSkillURLs.count == 5)
+        #expect(expectedSkillURLs.count == 1)
         #expect(updates.checkedSkillDirectoryURLs == expectedSkillURLs)
         #expect(updates.updateAvailableSkillDirectoryURLs == expectedSkillURLs)
         #expect(
@@ -766,7 +767,6 @@ struct SkillsCLIManagerTests {
         )
         #expect(await runner.temporaryDirectoryExisted)
         #expect(command.environment["SECRET_TOKEN"] == nil)
-        #expect(command.standardOutputURL?.deletingLastPathComponent() == command.currentDirectoryURL)
         #expect(mirroredLock["version"] as? Int == 3)
         #expect(mirroredLock["lastSelectedAgents"] == nil)
         #expect(
@@ -956,6 +956,24 @@ struct SkillsCLIManagerTests {
         #expect(await runner.commands.isEmpty)
     }
 
+    @Test("A missing global lock is distinct from a malformed lock")
+    func updateAvailabilityReportsMissingLock() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+        let runner = UpdateCheckCommandRunner(output: "")
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        do {
+            _ = try await manager.checkForUpdates()
+            Issue.record("Expected a missing-lock error")
+        } catch let error as SkillsCLIError {
+            #expect(error == .updateCheckLockMissing)
+        } catch {
+            Issue.record("Wrong error thrown: \(error)")
+        }
+        #expect(await runner.commands.isEmpty)
+    }
+
     @Test("An oversized lock never launches the CLI")
     func updateAvailabilityRejectsOversizedLock() async throws {
         let homeDirectory = try makeTemporaryDirectory()
@@ -1103,87 +1121,53 @@ struct SkillsCLIManagerTests {
     func processOutputCapture() async throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let outputURL = directory.appending(path: "stdout")
-        try #require(
-            FileManager.default.createFile(
-                atPath: outputURL.path(percentEncoded: false),
-                contents: Data(),
-                attributes: [.posixPermissions: 0o600]
-            )
-        )
         let runner = FoundationProcessCommandRunner()
         let command = ProcessCommand(
             executableURL: URL(filePath: "/bin/sh"),
             arguments: ["-c", "printf 'update-result'"],
             environment: ["PATH": "/usr/bin:/bin"],
             currentDirectoryURL: directory,
-            standardOutputURL: outputURL,
             maximumStandardOutputBytes: 32
         )
 
         let output = try #require(try await runner.run(command))
 
         #expect(output == Data("update-result".utf8))
-        #expect(try Data(contentsOf: outputURL) == output)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
     }
 
-    @Test("Captured stdout cannot be redirected through a child-replaced pathname")
-    func processOutputPathReplacement() async throws {
-        let fixtureRoot = try makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: fixtureRoot) }
-        let workingDirectory = fixtureRoot.appending(path: "working", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: false)
-        let outputURL = workingDirectory.appending(path: "stdout")
-        try #require(
-            FileManager.default.createFile(
-                atPath: outputURL.path(percentEncoded: false),
-                contents: Data(),
-                attributes: [.posixPermissions: 0o600]
-            )
-        )
-        let sentinelURL = fixtureRoot.appending(path: "sentinel")
-        let sentinel = Data("do-not-overwrite".utf8)
-        try sentinel.write(to: sentinelURL)
+    @Test("Captured stdout has no child-visible working-directory artifact")
+    func processOutputCaptureIsPipeOnly() async throws {
+        let workingDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: workingDirectory) }
         let runner = FoundationProcessCommandRunner()
         let command = ProcessCommand(
             executableURL: URL(filePath: "/bin/sh"),
             arguments: [
                 "-c",
-                "rm -f stdout; ln -s \"$1\" stdout; printf 'captured'",
-                "sh",
-                sentinelURL.path(percentEncoded: false),
+                "if [ -e update-check.stdout ]; then printf 'artifact'; else printf 'pipe-only'; fi",
             ],
             environment: ["PATH": "/usr/bin:/bin"],
             currentDirectoryURL: workingDirectory,
-            standardOutputURL: outputURL,
             maximumStandardOutputBytes: 32
         )
 
         let output = try #require(try await runner.run(command))
 
-        #expect(output == Data("captured".utf8))
-        #expect(try Data(contentsOf: sentinelURL) == sentinel)
+        #expect(output == Data("pipe-only".utf8))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: workingDirectory.path).isEmpty)
     }
 
     @Test("The Foundation runner terminates output that exceeds its byte limit")
     func processOutputLimit() async throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let outputURL = directory.appending(path: "stdout")
-        try #require(
-            FileManager.default.createFile(
-                atPath: outputURL.path(percentEncoded: false),
-                contents: Data(),
-                attributes: [.posixPermissions: 0o600]
-            )
-        )
         let runner = FoundationProcessCommandRunner(terminationGracePeriod: 0.05)
         let command = ProcessCommand(
             executableURL: URL(filePath: "/bin/sh"),
             arguments: ["-c", "while :; do printf '0123456789'; done"],
             environment: ["PATH": "/usr/bin:/bin"],
             currentDirectoryURL: directory,
-            standardOutputURL: outputURL,
             maximumStandardOutputBytes: 32
         )
         let clock = ContinuousClock()
@@ -1252,15 +1236,7 @@ struct SkillsCLIManagerTests {
     func processOutputCancellation() async throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let outputURL = directory.appending(path: "stdout")
         let readinessURL = directory.appending(path: "ready")
-        try #require(
-            FileManager.default.createFile(
-                atPath: outputURL.path(percentEncoded: false),
-                contents: Data(),
-                attributes: [.posixPermissions: 0o600]
-            )
-        )
         let runner = FoundationProcessCommandRunner(
             timeout: 30,
             terminationGracePeriod: 0.05
@@ -1275,7 +1251,6 @@ struct SkillsCLIManagerTests {
             ],
             environment: ["PATH": "/usr/bin:/bin"],
             currentDirectoryURL: directory,
-            standardOutputURL: outputURL,
             maximumStandardOutputBytes: 1_024
         )
         let task = Task {
@@ -1313,15 +1288,7 @@ struct SkillsCLIManagerTests {
         func processOutputDrainDeadline() async throws {
             let directory = try makeTemporaryDirectory()
             defer { try? FileManager.default.removeItem(at: directory) }
-            let outputURL = directory.appending(path: "stdout")
             let childPIDURL = directory.appending(path: "child-pid")
-            try #require(
-                FileManager.default.createFile(
-                    atPath: outputURL.path(percentEncoded: false),
-                    contents: Data(),
-                    attributes: [.posixPermissions: 0o600]
-                )
-            )
             defer {
                 if let pidText = try? String(contentsOf: childPIDURL, encoding: .utf8),
                     let pid = Int32(pidText)
@@ -1340,7 +1307,6 @@ struct SkillsCLIManagerTests {
                 ],
                 environment: ["PATH": "/usr/bin:/bin"],
                 currentDirectoryURL: directory,
-                standardOutputURL: outputURL,
                 maximumStandardOutputBytes: 32
             )
             let clock = ContinuousClock()
@@ -1495,14 +1461,12 @@ struct SkillsCLIManagerTests {
         in homeDirectory: URL,
         skillName: String
     ) -> Set<URL> {
-        Set(
-            SkillAgent.allCases.compactMap { agent in
-                agent.defaultSkillsDirectory(in: homeDirectory)?.appending(
-                    path: skillName,
-                    directoryHint: .isDirectory
-                )
-            }
-        )
+        [
+            homeDirectory.appending(
+                path: ".agents/skills/\(skillName)",
+                directoryHint: .isDirectory
+            )
+        ]
     }
 
     private func writeSkillLock(
@@ -1668,10 +1632,6 @@ private actor UpdateCheckCommandRunner: ProcessCommandRunning {
             temporaryDirectoryExisted = FileManager.default.fileExists(
                 atPath: temporaryDirectoryPath
             )
-        }
-
-        if let standardOutputURL = command.standardOutputURL {
-            try outputData.write(to: standardOutputURL)
         }
 
         if let error {

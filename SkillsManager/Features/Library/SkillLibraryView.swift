@@ -102,12 +102,39 @@ struct SkillLibraryView: View {
         .help("Sort skills by name, date added, or agent")
     }
 
+    @ViewBuilder
+    private var updateCheckControl: some View {
+        if model.updateCheckState == .checking {
+            HStack(spacing: SkillsManagerSpacing.small) {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("Checking for updates")
+
+                Button("Cancel Update Check", systemImage: "xmark.circle") {
+                    model.cancelUpdateAvailabilityRefresh()
+                }
+                .labelStyle(.iconOnly)
+                .help("Cancel the update check")
+            }
+        } else {
+            Button("Check for Updates", systemImage: "arrow.clockwise") {
+                model.startUpdateAvailabilityRefresh()
+            }
+            .keyboardShortcut("r", modifiers: .command)
+            .help("Check tracked skills for available updates (Command-R)")
+        }
+    }
+
     /// Splits display controls from discovery and configuration actions so the
     /// two groups read as separate Liquid Glass clusters.
     @ToolbarContentBuilder
     private var libraryViewToolbarContent: some ToolbarContent {
         if #available(macOS 26.0, *) {
             ToolbarSpacer(.fixed, placement: .primaryAction)
+        }
+
+        ToolbarItem(placement: .primaryAction) {
+            updateCheckControl
         }
 
         ToolbarItem(placement: .primaryAction) {

@@ -95,29 +95,43 @@ hand-off when full Xcode is available. If Xcode is unavailable, run
 - Treat update availability as the invariant primary partition for every
   library sort. Preserve the selected name, date-added, or agent order and its
   stable tie breakers within both the update and current partitions. Present an
-  available update with visible text and a symbol, and include `Update available`
-  in the row's explicit combined accessibility label; color alone is not enough.
+  available update as a visible non-action `Update` indicator and include
+  `Update available` in the row's explicit combined accessibility label; color
+  alone is not enough. Explicitly unknown rows must show `Not checked` and
+  announce that update status was not checked.
 - Run one update-availability check only after restored sources finish scanning.
-  Clear prior positive detections before awaiting the result. Keep exact checked
-  built-in-directory URL identities separate from the update-available subset
-  and require the latter to be a subset of the former. A version-3 global lock
-  has no per-agent destination list, so project each validated name into all
-  five deduplicated fixed account-home locations: `.agents/skills` (shared by
-  Global and Codex), `.claude/skills`, `.cursor/skills`, `.copilot/skills`, and
-  `.gemini/skills`; never match by final path component. Canonicalize returned
-  and installed URLs, then apply an authoritative status only when one checked
-  canonical URL maps to exactly one installed skill. Same-named copies outside
-  those fixed destinations, empty or partial locks, unchecked URLs, and
-  ambiguous duplicate physical identities remain unknown and must produce a
-  partial state rather than an all-current claim.
+  Keep a persistent toolbar `Check for Updates` control with Command-R, and
+  replace it with progress and a Cancel control while checking. Keep exact
+  checked Global-directory URL identities separate from the update-available
+  subset and require the latter to be a subset of the former. A version-3 lock
+  has no per-agent destination identity, and `skillFolderHash` describes a
+  remote tree rather than the local provenance of same-named copies. Project each
+  validated name only to the resolved account home's
+  `.agents/skills/<validated-name>` path; never match by final path component.
+  Canonicalize returned and installed URLs, then apply an authoritative status
+  only when one checked canonical URL maps to exactly one installed skill.
+  Copies in every other agent or custom directory, empty or partial locks,
+  unchecked URLs, and ambiguous duplicate physical identities remain unknown
+  and must produce a counted partial state rather than an all-current claim.
 - Use `SkillUpdateStatus.unknown`, `.current`, and `.available` after a probe.
   Reserve a nil status for pre-probe or legacy decoded data, where version
   comparison is a compatibility fallback. Explicit `.unknown` must suppress
-  stale version-based update badges. Retain the normalized last successful
-  result and reapply it after each successful rescan so covered skills keep their
-  status while newly discovered unchecked skills downgrade the overall state to
-  partial. Distinguish idle, checking, partial, current, and unavailable UI
-  states. A cancellation or error must leave no positive update claim.
+  stale version-based update badges. Preserve the last trustworthy statuses and
+  count while a refresh is awaiting the CLI, then replace them atomically only
+  after a trustworthy result; cancellation or failure must leave no positive
+  claim. Retain the normalized last successful result and reapply it after each
+  successful rescan so covered skills keep their status while newly discovered
+  unchecked skills downgrade the overall state to partial. Distinguish idle,
+  checking, counted partial, current, unsupported, and unavailable UI states.
+  Treat a missing lock as quiet unavailable and missing Node.js/`npx` or manager
+  support as quiet unsupported; reserve modal errors for malformed input,
+  execution failure, timeout, or invalid output. An empty library returns to
+  idle rather than all-current. Announce completion and coverage to VoiceOver,
+  and disable update-driven reorder animation when Reduce Motion is enabled.
+- The launch-time check is currently automatic and network-capable, with no
+  consent prompt or preference. Keep Security finding 2 documented as a
+  residual Low risk pending a product decision; do not imply that opt-in or an
+  opt-out setting exists.
 
 ## Testing conventions
 
@@ -126,11 +140,12 @@ hand-off when full Xcode is available. If Xcode is unavailable, run
 - Mirror production folders in test folders where practical.
 - Keep tests deterministic, parallel-safe, and independent of real user files.
 - Prefer `#require` for preconditions and `#expect` for behavior assertions.
-- Keep real-process regressions for the stdout byte ceiling and capture-task
-  cancellation, plus the macOS-only inherited-writer drain deadline. Make the
-  cancellation subprocess create a readiness marker and wait for it before
-  cancelling; a fixed sleep does not prove the child reached the intended state.
-  Do not substitute an injected runner for those descriptor-lifecycle checks.
+- Keep real-process regressions for the stdout byte ceiling, capture-task
+  cancellation, pipe-only capture with no working-directory artifact, and the
+  macOS-only inherited-writer drain deadline. Make the cancellation subprocess
+  create a readiness marker and wait for it before cancelling; a fixed sleep
+  does not prove the child reached the intended state. Do not substitute an
+  injected runner for those descriptor-lifecycle checks.
 
 ## Project-file policy
 
@@ -151,9 +166,10 @@ Hardened Runtime enabled for the app target even while App Sandbox is disabled.
 Never log skill contents, tokens, credentials, the inherited environment, CLI
 output, or user-specific absolute paths. Keep process standard input, output,
 and error disconnected except for the update-availability probe's reviewed,
-bounded, owner-only stdout capture. That capture is parser input only; never
-render or log its raw contents. Any other diagnostic path requires a separate
-security review and a bounded presentation design.
+bounded, pipe-only stdout capture. Keep it in memory and never create an
+`update-check.stdout` or other child-visible capture artifact. That capture is
+parser input only; never render or log its raw contents. Any other diagnostic
+path requires a separate security review and a bounded presentation design.
 
 Serialize source-configuration mutations across their persistence commit or
 rollback; MainActor isolation alone is reentrant across an `await`. Release that
@@ -212,12 +228,13 @@ needed for Node and Git. Reject a non-absolute resolved executable directory or
 one containing the `PATH` delimiter instead of splitting it into unintended
 search locations. Child environments are allowlists: pass only the applicable
 real or disposable home, that constructed path, locale and temporary-directory
-values, telemetry opt-outs, and explicit npm settings. Pin lifecycle execution
-to the reviewed `skills@1.5.21` package from `https://registry.npmjs.org/`,
-disable npm lifecycle
-scripts, ignore user/global npm configuration, and run from a fresh owner-only
-empty directory so a local package cannot shadow the selected binary. Do not
-forward unrelated parent variables, proxy credentials, tokens, or secrets.
+values, telemetry opt-outs, and explicit npm/Git settings. Set
+`GIT_TERMINAL_PROMPT=0` so a remote source cannot trigger an interactive
+credential prompt. Pin lifecycle execution to the reviewed `skills@1.5.21`
+package from `https://registry.npmjs.org/`, disable npm lifecycle scripts,
+ignore user/global npm configuration, and run from a fresh owner-only empty
+directory so a local package cannot shadow the selected binary. Do not forward
+unrelated parent variables, proxy credentials, tokens, or secrets.
 
 The shared `SkillsCLIManager` must serialize availability, install, update, and
 remove calls so the CLI cannot race its own lock-file mutations. Every directly
@@ -246,7 +263,10 @@ skill-name filters, has no agent selector, and exposes no JSON result for
 per-source update action, because they can reconcile shared lock state and
 reinstall content outside the selected agent directory. The actual update
 action must continue to fail closed with `scopedUpdateUnsupported` until a
-separately reviewed upstream contract makes the mutation agent-scoped.
+separately reviewed upstream contract makes the mutation agent-scoped. Present
+update availability as status rather than an action across rows, detail views,
+context menus, and multi-selection. Use inert `Reinstall Required` guidance and
+direct users to reinstall from a trusted source for a scoped refresh.
 
 Update availability is the one reviewed use of that mutating path. It must read
 and validate only `~/.agents/.skill-lock.json`: reject symbolic links and
@@ -256,8 +276,8 @@ remote sources, inconsistent metadata grouped under one source, unsupported
 source types, unsafe relative manifest paths, and incomplete hashes or metadata.
 Re-encode only the validated fields as a canonical lock inside a fresh `0700`
 disposable home, with the mirrored lock at `0600`. Create a separate `0700`
-working directory and `0600` stdout file, then
-launch only this exact argument vector through the existing serialized manager:
+working directory, then launch only this exact argument vector through the
+existing serialized manager:
 
 ```text
 npx --yes --package skills@1.5.21 -- skills check --global --yes
@@ -266,29 +286,31 @@ npx --yes --package skills@1.5.21 -- skills check --global --yes
 Use the existing environment allowlist, but redirect `HOME`, `CODEX_HOME`, and
 `TMPDIR` into the disposable home. Do not expose a real skills directory,
 project lock, inherited npm/Git configuration, credentials, or unrelated parent
-variables. Pre-open the owner-only stdout file before launch, bound the pipe to
-256 KiB while streaming, and return the captured bytes without reopening a
-child-writable pathname; exceeding the limit must stop the direct process and
-fail closed. The capture task must be the sole owner and closer of the pipe's read
-descriptor. Cancel and await that task when the caller is cancelled, capture
-fails, or the one-second post-process drain deadline expires; never race it with
-an external descriptor close. After a zero exit, require bounded UTF-8 and parse
-only the reviewed transcript grammar in its expected order. Reject unknown
-terminal controls or lines, failure/skip/deletion diagnostics, unexpected or
-duplicate names and sources, and inconsistent found/update/summary counts.
-The version-3 global lock has no per-agent destination list. Convert every
-validated checked name and update-available name into exact file URL identities
-under all five deduplicated fixed account-home locations: `.agents/skills`
-(shared by Global and Codex), `.claude/skills`, `.cursor/skills`,
-`.copilot/skills`, and `.gemini/skills`; do not accept a path from lock or
+variables. Set `GIT_TERMINAL_PROMPT=0`. Capture stdout directly from an
+anonymous pipe into memory, bounded to 256 KiB while streaming; create no stdout
+file or child-visible output path. Exceeding the limit must stop the direct
+process and fail closed. The capture task must be the sole owner and closer of
+the pipe's read descriptor. Cancel and await that task when the caller is
+cancelled, capture fails, or the one-second post-process drain deadline expires;
+never race it with an external descriptor close. After a zero exit, require the
+returned bounded bytes to be UTF-8 and parse only the reviewed transcript
+grammar in its expected order. Reject unknown terminal controls or lines,
+failure/skip/deletion diagnostics, unexpected or duplicate names and sources,
+and inconsistent found/update/summary counts.
+The version-3 global lock has no per-agent destination identity, and its
+`skillFolderHash` is remote-tree provenance rather than proof of a local copy's
+contents. Convert every validated checked name and update-available name only
+into an exact file URL under the resolved account home's
+`.agents/skills/<validated-name>` directory; do not infer identities for Claude,
+Cursor, Copilot, Gemini, or custom paths, and do not accept a path from lock or
 transcript text. Return those checked URLs separately from the update-available
 URL subset, and never treat an empty lock as evidence that installed skills are
-current. Deferred cleanup must cover the stdout file, working directory,
-canonical lock, and full disposable home after success, launch failure, nonzero
-exit, timeout, cancellation, and parse failure. Direct the reviewed upstream
-path's downloads and installs into that disposable home and never provide a real
-skill path, but do not describe this environment configuration as a filesystem
-sandbox or upstream `check` as read-only.
+current. Deferred cleanup must cover the working directory, canonical lock, and
+full disposable home after success, launch failure, nonzero exit, timeout,
+cancellation, and parse failure. Direct the reviewed upstream path's downloads
+and installs into that disposable home and never provide a real skill path, but
+do not describe this environment configuration as a filesystem sandbox or
+upstream `check` as read-only.
 
 Treat each selected skill or destination as an independent lifecycle outcome,
 preserve failures in the UI, and rescan disk after successes. Removal

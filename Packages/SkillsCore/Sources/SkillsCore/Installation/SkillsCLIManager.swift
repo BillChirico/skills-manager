@@ -49,7 +49,6 @@ struct ProcessCommand: Equatable, Sendable {
     let arguments: [String]
     let environment: [String: String]
     let currentDirectoryURL: URL
-    let standardOutputURL: URL?
     let maximumStandardOutputBytes: Int?
 
     init(
@@ -57,14 +56,12 @@ struct ProcessCommand: Equatable, Sendable {
         arguments: [String],
         environment: [String: String],
         currentDirectoryURL: URL,
-        standardOutputURL: URL? = nil,
         maximumStandardOutputBytes: Int? = nil
     ) {
         self.executableURL = executableURL
         self.arguments = arguments
         self.environment = environment
         self.currentDirectoryURL = currentDirectoryURL
-        self.standardOutputURL = standardOutputURL
         self.maximumStandardOutputBytes = maximumStandardOutputBytes
     }
 }
@@ -88,17 +85,14 @@ struct FoundationProcessCommandRunner: ProcessCommandRunning {
 
     @discardableResult
     func run(_ command: ProcessCommand) async throws -> Data? {
-        guard
-            (command.standardOutputURL == nil && command.maximumStandardOutputBytes == nil)
-                || (command.standardOutputURL != nil && command.maximumStandardOutputBytes != nil)
-        else {
-            throw SkillsCLIError.commandCouldNotLaunch
-        }
         let outputCapture: BoundedProcessOutputCapture?
-        do {
-            outputCapture = try BoundedProcessOutputCapture(command: command)
-        } catch {
-            throw SkillsCLIError.updateCheckOutputInvalid
+        if let maximumBytes = command.maximumStandardOutputBytes {
+            guard maximumBytes >= 0 else {
+                throw SkillsCLIError.commandCouldNotLaunch
+            }
+            outputCapture = BoundedProcessOutputCapture(maximumBytes: maximumBytes)
+        } else {
+            outputCapture = nil
         }
 
         let execution = ProcessExecution(
@@ -115,7 +109,7 @@ struct FoundationProcessCommandRunner: ProcessCommandRunning {
 
         do {
             try await execution.run()
-            if let outputCapture, let captureTask {
+            if let captureTask {
                 let result = await withTaskCancellationHandler {
                     await withTaskGroup(of: OutputCaptureWaitResult.self) { group in
                         group.addTask {
@@ -160,7 +154,6 @@ struct FoundationProcessCommandRunner: ProcessCommandRunning {
                     }
                     throw SkillsCLIError.updateCheckOutputInvalid
                 }
-                try outputCapture.persist(data)
                 return data
             }
             return nil
@@ -169,7 +162,6 @@ struct FoundationProcessCommandRunner: ProcessCommandRunning {
                 captureTask.cancel()
                 _ = await captureTask.result
             }
-            outputCapture?.discardOutputFile()
             throw error
         }
     }
@@ -184,18 +176,9 @@ private enum OutputCaptureWaitResult: Sendable {
 private final class BoundedProcessOutputCapture: @unchecked Sendable {
     let pipe = Pipe()
     private let maximumBytes: Int
-    private let outputFile: FileHandle
 
-    init?(command: ProcessCommand) throws {
-        guard
-            let outputURL = command.standardOutputURL,
-            let maximumBytes = command.maximumStandardOutputBytes,
-            maximumBytes >= 0
-        else {
-            return nil
-        }
+    init(maximumBytes: Int) {
         self.maximumBytes = maximumBytes
-        self.outputFile = try FileHandle(forWritingTo: outputURL)
     }
 
     /// Owns the pipe's read end for its complete lifetime. Callers cancel this
@@ -257,21 +240,6 @@ private final class BoundedProcessOutputCapture: @unchecked Sendable {
         }
     }
 
-    func persist(_ data: Data) throws {
-        defer { try? outputFile.close() }
-
-        do {
-            try outputFile.truncate(atOffset: 0)
-            try outputFile.write(contentsOf: data)
-            try outputFile.synchronize()
-        } catch {
-            throw SkillsCLIError.updateCheckOutputInvalid
-        }
-    }
-
-    func discardOutputFile() {
-        try? outputFile.close()
-    }
 }
 
 /// Coordinates Foundation's callback-based process API with structured
@@ -487,6 +455,7 @@ public enum SkillsCLIError: Error, Equatable, LocalizedError, Sendable {
     case destinationAlreadyExists(URL)
     case unsafeNpxLocation
     case workingDirectoryUnavailable
+    case updateCheckLockMissing
     case updateCheckLockInvalid
     case updateCheckOutputInvalid
     case commandCouldNotLaunch
@@ -529,6 +498,8 @@ public enum SkillsCLIError: Error, Equatable, LocalizedError, Sendable {
             "Skills Manager cannot safely construct an executable search path for this npx installation."
         case .workingDirectoryUnavailable:
             "Skills Manager could not create a private working directory for the skills CLI."
+        case .updateCheckLockMissing:
+            "No global skills lock file was found. Install a tracked skill before checking for updates."
         case .updateCheckLockInvalid:
             "Skills Manager could not safely read the global skills lock file, so update availability is unavailable."
         case .updateCheckOutputInvalid:
@@ -738,20 +709,6 @@ public actor SkillsCLIManager: SkillManaging {
 
         let workingDirectory = try makePrivateTemporaryDirectory(prefix: "SkillsManager-Check-CLI")
         defer { try? FileManager.default.removeItem(at: workingDirectory) }
-        let outputURL = workingDirectory.appending(
-            path: "update-check.stdout",
-            directoryHint: .notDirectory
-        )
-        guard
-            FileManager.default.createFile(
-                atPath: outputURL.path(percentEncoded: false),
-                contents: Data(),
-                attributes: [.posixPermissions: 0o600]
-            )
-        else {
-            throw SkillsCLIError.workingDirectoryUnavailable
-        }
-
         var environment = try sanitizedEnvironment(
             npxExecutableURL: npxExecutableURL,
             workingDirectory: workingDirectory,
@@ -778,7 +735,6 @@ public actor SkillsCLIManager: SkillManaging {
                 ],
                 environment: environment,
                 currentDirectoryURL: workingDirectory,
-                standardOutputURL: outputURL,
                 maximumStandardOutputBytes: Self.maximumUpdateOutputBytes
             )
         )
@@ -801,22 +757,22 @@ public actor SkillsCLIManager: SkillManaging {
         )
     }
 
-    /// A global lock key can represent one or more `--global --agent ... --copy`
-    /// destinations, but version 3 stores no per-agent list. Project validated
-    /// keys only into the app's fixed built-in destinations; model reconciliation
-    /// intersects these identities with installations actually discovered there.
+    /// Version 3 stores no per-agent destinations or local-content proof. Only
+    /// the shared global directory can be attributed to the global lock without
+    /// guessing that a same-named copy in another agent directory has the same
+    /// provenance.
     private func updateDirectoryURLs(for skillNames: Set<String>) -> Set<URL> {
-        let supportedDirectories = Set(
-            SkillAgent.allCases.compactMap {
-                $0.defaultSkillsDirectory(in: homeDirectory)
-            }
+        let sharedGlobalDirectory = homeDirectory.appending(
+            path: ".agents/skills",
+            directoryHint: .isDirectory
         )
 
         return Set(
-            skillNames.flatMap { skillName in
-                supportedDirectories.map {
-                    $0.appending(path: skillName, directoryHint: .isDirectory)
-                }
+            skillNames.map { skillName in
+                sharedGlobalDirectory.appending(
+                    path: skillName,
+                    directoryHint: .isDirectory
+                )
             }
         )
     }
@@ -1086,6 +1042,7 @@ public actor SkillsCLIManager: SkillManaging {
             "NPM_CONFIG_YES": "true",
             "GIT_CONFIG_GLOBAL": "/dev/null",
             "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_TERMINAL_PROMPT": "0",
         ]
 
         for key in ["LANG", "LC_ALL", "TMPDIR"] {
@@ -1131,7 +1088,12 @@ public actor SkillsCLIManager: SkillManaging {
         } catch {
             throw SkillsCLIError.updateCheckLockInvalid
         }
-        guard fileSystemEntry(at: lockURL) == .regularFile else {
+        switch fileSystemEntry(at: lockURL) {
+        case .missing:
+            throw SkillsCLIError.updateCheckLockMissing
+        case .regularFile:
+            break
+        case .symbolicLink, .directory, .other:
             throw SkillsCLIError.updateCheckLockInvalid
         }
 

@@ -129,16 +129,12 @@ struct SkillDetail: View {
     private func actionBar(for skill: AgentSkill) -> some View {
         HStack(spacing: SkillsManagerSpacing.small) {
             if skill.hasUpdate {
-                Button(
-                    "Update to \(skill.availableVersion ?? "Latest")",
-                    systemImage: "arrow.down.circle"
-                ) {
-                    Task { @MainActor in
-                        await model.updateSkills([skill.id])
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.isMutating(skill.id))
+                Label("Reinstall Required", systemImage: "arrow.down.circle")
+                    .foregroundStyle(.secondary)
+                    .help(Self.scopedUpdateHelp)
+                    .accessibilityLabel(
+                        "Update available. Reinstall from a trusted source to update."
+                    )
             }
 
             Button(skill.isEnabled ? "Disable" : "Enable") {
@@ -311,17 +307,11 @@ struct SkillDetail: View {
                 .foregroundStyle(.secondary)
 
             HStack(spacing: SkillsManagerSpacing.small) {
-                Button(bulkUpdateTitle, systemImage: "arrow.down.circle") {
-                    let skillIDs = model.selectedSkillIDs
-                    Task { @MainActor in
-                        await model.updateSkills(skillIDs)
-                    }
+                if model.selectedSkills.contains(where: \.hasUpdate) {
+                    Label("Reinstall Required", systemImage: "arrow.down.circle")
+                        .foregroundStyle(.secondary)
+                        .help(Self.scopedUpdateHelp)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(
-                    model.selectedSkills.contains(where: \.hasUpdate) == false
-                        || selectedSkillsAreMutating
-                )
 
                 Button(bulkEnablementTitle) {
                     model.setSkillsEnabled(
@@ -354,9 +344,8 @@ struct SkillDetail: View {
         return "Manage the selected skills together."
     }
 
-    private var bulkUpdateTitle: String {
-        model.selectedSkills.count == 2 ? "Update Both" : "Update Selected"
-    }
+    private static let scopedUpdateHelp =
+        "The skills CLI cannot safely update one agent folder. Reinstall the skill from a trusted source to update it."
 
     private var bulkEnablementTitle: String {
         model.selectedSkills.allSatisfy { $0.isEnabled == false } ? "Enable" : "Disable"

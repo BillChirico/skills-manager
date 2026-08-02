@@ -14,8 +14,9 @@ final class SkillLibraryModel {
     enum UpdateCheckState: Hashable {
         case idle
         case checking
-        case partial
+        case partial(checked: Int, total: Int)
         case current
+        case unsupported
         case unavailable
     }
 
@@ -87,6 +88,7 @@ final class SkillLibraryModel {
     @ObservationIgnored private var sourceMutationIsRunning = false
     @ObservationIgnored private var sourceMutationWaiters: [CheckedContinuation<Void, Never>] = []
     @ObservationIgnored private var lastUpdateAvailability: SkillUpdateAvailability?
+    @ObservationIgnored private var updateCheckTask: Task<Void, Never>?
 
     init(
         sources: [SkillSource] = [],
@@ -164,6 +166,31 @@ final class SkillLibraryModel {
             "Search Recently Added"
         case .source(let sourceID):
             "Search \(source(for: sourceID)?.displayName ?? "Directory")"
+        }
+    }
+
+    var updateCheckCompletionAnnouncement: String {
+        let updateCount = updatesAvailableCount
+        let updateDescription =
+            updateCount == 1
+            ? "1 update available."
+            : "\(updateCount) updates available."
+
+        switch updateCheckState {
+        case .idle:
+            return skills.isEmpty
+                ? "Update check complete. No installed skills to check."
+                : "Update check cancelled."
+        case .checking:
+            return "Checking for updates."
+        case .partial(let checked, let total):
+            return "\(updateDescription) \(checked) of \(total) skills checked."
+        case .current:
+            return updateCount == 0 ? "All checked skills are up to date." : updateDescription
+        case .unsupported:
+            return "Update checking is unavailable. Node.js 22.20 or newer is required."
+        case .unavailable:
+            return "Update status is unavailable."
         }
     }
 
@@ -389,17 +416,43 @@ final class SkillLibraryModel {
         }
     }
 
+    @discardableResult
+    func startUpdateAvailabilityRefresh() -> Task<Void, Never> {
+        if let updateCheckTask {
+            return updateCheckTask
+        }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performUpdateAvailabilityRefresh()
+        }
+        updateCheckTask = task
+        return task
+    }
+
+    func cancelUpdateAvailabilityRefresh() {
+        updateCheckTask?.cancel()
+    }
+
     func refreshUpdateAvailability() async {
+        let task = startUpdateAvailabilityRefresh()
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func performUpdateAvailabilityRefresh() async {
+        defer { updateCheckTask = nil }
+
         guard let skillManager else {
-            updateCheckState = .idle
+            clearUpdateAvailability(preservingUncheckedSkills: true)
+            updateCheckState = .unsupported
             return
         }
 
         updateCheckState = .checking
-        lastUpdateAvailability = nil
-        for index in skills.indices {
-            skills[index].updateStatus = .unknown
-        }
 
         do {
             let result = try await skillManager.checkForUpdates()
@@ -408,12 +461,32 @@ final class SkillLibraryModel {
             lastUpdateAvailability = availability
             applyUpdateAvailability(availability)
         } catch is CancellationError {
+            clearUpdateAvailability()
             updateCheckState = .idle
         } catch let error as SkillsCLIError where error == .commandCancelled {
+            clearUpdateAvailability()
             updateCheckState = .idle
+        } catch let error as SkillsCLIError where error == .npxNotFound {
+            clearUpdateAvailability()
+            updateCheckState = .unsupported
+        } catch let error as SkillsCLIError where error == .updateCheckLockMissing {
+            clearUpdateAvailability()
+            updateCheckState = .unavailable
         } catch {
+            clearUpdateAvailability()
             updateCheckState = .unavailable
             report(error, title: "Unable to Check for Updates")
+        }
+    }
+
+    private func clearUpdateAvailability(preservingUncheckedSkills: Bool = false) {
+        lastUpdateAvailability = nil
+        skills = skills.map { skill in
+            var skill = skill
+            if !preservingUncheckedSkills || skill.updateStatus != nil {
+                skill.updateStatus = .unknown
+            }
+            return skill
         }
     }
 
@@ -444,14 +517,18 @@ final class SkillLibraryModel {
         )
     }
 
-    private func applyUpdateAvailability(_ availability: SkillUpdateAvailability) {
+    private func applyUpdateAvailability(
+        _ availability: SkillUpdateAvailability,
+        updatesCheckState: Bool = true
+    ) {
         let indicesByDirectoryURL = Dictionary(grouping: skills.indices) { index in
             canonicalDirectoryURL(for: skills[index].directoryURL)
         }
         var uniquelyCheckedIndices = Set<Int>()
+        var reconciledSkills = skills
 
-        for index in skills.indices {
-            skills[index].updateStatus = .unknown
+        for index in reconciledSkills.indices {
+            reconciledSkills[index].updateStatus = .unknown
         }
         for checkedURL in availability.checkedSkillDirectoryURLs {
             guard
@@ -461,13 +538,26 @@ final class SkillLibraryModel {
             else {
                 continue
             }
-            skills[index].updateStatus =
+            reconciledSkills[index].updateStatus =
                 availability.updateAvailableSkillDirectoryURLs.contains(checkedURL)
                 ? .available : .current
             uniquelyCheckedIndices.insert(index)
         }
-        updateCheckState =
-            uniquelyCheckedIndices.count == skills.count ? .current : .partial
+        skills = reconciledSkills
+
+        guard updatesCheckState else {
+            return
+        }
+        if skills.isEmpty {
+            updateCheckState = .idle
+        } else if uniquelyCheckedIndices.count == skills.count {
+            updateCheckState = .current
+        } else {
+            updateCheckState = .partial(
+                checked: uniquelyCheckedIndices.count,
+                total: skills.count
+            )
+        }
     }
 
     func addSource(
@@ -773,7 +863,10 @@ final class SkillLibraryModel {
             skills.append(contentsOf: mergedSkills)
             skills = Self.sortedSkills(skills)
             if let lastUpdateAvailability {
-                applyUpdateAvailability(lastUpdateAvailability)
+                applyUpdateAvailability(
+                    lastUpdateAvailability,
+                    updatesCheckState: updateCheckState != .checking
+                )
             }
             sourceStates[sourceID] = .available
             reconcileSelection()

@@ -25,10 +25,12 @@ The current product surface includes:
 - installation into one or many supported agent directories through the official
   `skills` CLI;
 - name, date-added, and agent sorting with updates kept first, the agent and
-  source shown on every row, and an accessible text-and-symbol update badge;
+  source shown on every row, an accessible non-action `Update` indicator, and
+  explicit `Not checked` status for unknown rows;
 - an isolated, fail-closed availability check, CLI-backed on-disk removal, and
-  an intentionally unavailable per-skill update action, plus controls for
-  enabling, revealing, opening, and copying the path of a skill;
+  an intentionally unavailable per-skill update action, with a persistent
+  toolbar check control, Command-R shortcut, progress, and cancellation, plus
+  controls for enabling, revealing, opening, and copying the path of a skill;
 - directory rename, agent assignment, enable, rescan, reveal, and remove
   controls;
 - a resizable Settings folder list with native plus/minus management controls,
@@ -118,11 +120,11 @@ npx --yes --package skills@1.5.21 -- skills check --global --yes
 ```
 
 The probe receives the normal scrubbed environment with `HOME`, `CODEX_HOME`,
-and `TMPDIR` redirected into that disposable home. It runs from a separate
-owner-only working directory and captures at most 256 KiB of stdout. The runner
-opens an owner-only output file before launch, drains the child through a bounded
-pipe, and parses those captured bytes without reopening a child-writable path.
-The capture task alone owns and closes the pipe's read descriptor. Caller
+and `TMPDIR` redirected into that disposable home and
+`GIT_TERMINAL_PROMPT=0`. It runs from a separate owner-only working directory
+and captures at most 256 KiB of stdout directly from an anonymous pipe into
+memory; it creates no `update-check.stdout` or other capture artifact. The
+capture task alone owns and closes the pipe's read descriptor. Caller
 cancellation cancels and awaits that task; after the direct process exits, a
 one-second drain deadline cancels it and fails closed if an inherited writer is
 still holding the pipe open. The probe never receives a path to a real skill
@@ -130,48 +132,67 @@ installation. After a zero exit, Skills Manager accepts only the reviewed text
 transcript in its expected order: unknown controls or lines, unexpected names or
 sources, duplicate names, failure or deletion diagnostics, malformed UTF-8, and
 inconsistent counts all fail closed. Deferred cleanup covers the canonical lock,
-captured output, working directory, and complete disposable home on success,
-failure, launch error, timeout, cancellation, and parse failure.
+working directory, and complete disposable home on success, failure, launch
+error, timeout, cancellation, and parse failure.
 
-One availability check runs after restored sources finish scanning. Its
-`SkillUpdateAvailability` result separates exact checked built-in-installation
-URLs from the update-available subset. The version-3 global lock records no
-per-agent destination list, so after the isolated-home probe validates a name,
-the manager projects it into all five deduplicated fixed locations under the
-resolved account home: `.agents/skills` (shared by Global and Codex),
-`.claude/skills`, `.cursor/skills`, `.copilot/skills`, and `.gemini/skills`.
-Neither the lock nor CLI output can supply an arbitrary installation path. The
-model canonicalizes the returned and installed directory URLs and intersects
-them exactly, so a discovered skill at one of those fixed destinations can
-receive status while a same-named custom-path skill remains unknown.
+One availability check runs automatically after restored sources finish
+scanning. Its `SkillUpdateAvailability` result separates exact checked Global
+installation URLs from the update-available subset. The version-3 lock records
+no per-agent destination identity, and `skillFolderHash` describes remote-tree
+provenance rather than proving the local contents of same-named copies. The
+production manager therefore projects each validated name only to
+`~/.agents/skills/<validated-name>`, the shared Global/Codex directory. Neither
+the lock nor CLI output can supply another installation path. The model
+canonicalizes returned and installed directory URLs and intersects them exactly,
+so copies in Claude, Cursor, Copilot, Gemini, or custom folders remain unknown.
 
 `AgentSkill` records an explicit update status: unknown, current, or available.
 A nil status exists only for pre-probe and legacy decoded data, where version
-comparison remains a compatibility fallback. Once a check starts, unknown is
-explicit and suppresses any stale version-based badge. Only a checked canonical
-URL that maps to one installed skill becomes current or available; empty and
-partial locks, unchecked URLs, and ambiguous duplicate physical identities stay
-unknown. Any unknown installation prevents an all-current claim and produces a
-partial state with a retry. The normalized last successful result is reapplied
-after every successful rescan, preserving covered statuses while making newly
-discovered unchecked skills unknown and downgrading the overall state to partial.
-An error or cancellation clears prior positive claims.
+comparison remains a compatibility fallback. Explicit unknown suppresses any
+stale version-based badge. Only a checked canonical URL that maps to one
+installed skill becomes current or available; empty and partial locks, unchecked
+URLs, and ambiguous duplicate physical identities stay unknown. Any unknown
+installation prevents an all-current claim and produces a counted partial state,
+such as `Checked 2 of 5 skills`. An empty library returns to not checked instead
+of claiming everything is current. The normalized last successful result is
+reapplied after every successful rescan, preserving covered statuses while
+making newly discovered unchecked skills unknown and downgrading the overall
+state to partial.
+
+The toolbar keeps `Check for Updates` available throughout the library with a
+Command-R shortcut. While checking, a spinner and Cancel control replace it and
+the last trustworthy badges and update count remain visible until the new result
+arrives; success replaces statuses atomically, while cancellation or failure
+clears them. A missing global lock is a quiet unavailable state, and missing
+Node.js/`npx` is a quiet unsupported state; neither opens a modal alert. Unsafe
+input, failed execution, timeout, or invalid output still reports an error.
 
 Skills with confirmed updates form the first partition of every name,
 date-added, or agent sort while preserving the selected order within both
-partitions. Each affected row presents both the word `Update` and a download
-symbol, and its combined accessibility label says `Update available`. The
-Updates Available empty state distinguishes not checked, checking, partially
-checked, unavailable, and confirmed-current results.
+partitions. Each affected row presents a non-action `Update` indicator and its
+combined accessibility label says `Update available`; unknown rows say
+`Not checked`. Reordering uses a state-scoped animation that is disabled when
+Reduce Motion is enabled. When checking finishes, VoiceOver announces the update
+count and, for partial results, the checked and total counts. The Updates
+Available empty state distinguishes not checked, checking, counted partial,
+unsupported, unavailable, and confirmed-current results.
 
 The actual per-skill update action remains fail-closed. Release 1.5.21 can
 filter an update by skill and global/project scope, but has no `--agent` option;
 Skills Manager refuses the action before process launch rather than risk
-changing shared lock state or another agent directory. Reinstall from a reviewed
-source is the current safe refresh path. Remove deletes successful skill
+changing shared lock state or another agent directory. Row, detail, context-menu,
+and multi-select update surfaces are all inert `Reinstall Required` guidance,
+not buttons; users must reinstall from a trusted source for a safely scoped
+refresh. Remove deletes successful skill
 directories from the library and disk, rescans affected sources, and leaves
 failed selections visible. Busy state prevents the same skill from receiving
 overlapping mutations.
+
+The launch-time availability check can access the network because the pinned
+probe may fetch repositories inside its disposable home. The app currently has
+no consent prompt or preference to disable that automatic check. Security review
+finding 2 records this as a residual Low risk pending a product decision; the
+current release does not implement that preference.
 
 ### The install command
 
@@ -193,17 +214,18 @@ and readable but are not install, update, or remove targets.
 The child process receives a minimal environment containing the account home,
 the validated absolute `npx`/Node directory plus fixed system executable
 directories, locale and temporary-directory settings, telemetry opt-outs, and
-non-interactive npm settings. Empty, relative, and delimiter-unsafe executable
-search locations are rejected. The app uses the public npm registry, disables
-lifecycle scripts, and runs from a new owner-only empty working directory.
-Unrelated parent variables, arbitrary inherited `PATH` entries, npm
-configuration, and secrets are not forwarded. Install and remove disconnect
-standard input, output, and error. The isolated availability probe is the sole
-reviewed exception: input and error remain disconnected while stdout is captured
-through the bounded private file described above; raw output is never logged or
-shown. A five-minute deadline and task cancellation stop the directly launched
-`npx` process, with a forced stop after a grace period. Descendant work started
-by that process is not supervised and may continue.
+non-interactive npm and Git settings, including `GIT_TERMINAL_PROMPT=0`. Empty,
+relative, and delimiter-unsafe executable search locations are rejected. The app
+uses the public npm registry, disables lifecycle scripts, and runs from a new
+owner-only empty working directory. Unrelated parent variables, arbitrary
+inherited `PATH` entries, npm configuration, and secrets are not forwarded.
+Install and remove disconnect standard input, output, and error. The isolated
+availability probe is the sole reviewed exception: input and error remain
+disconnected while stdout is captured through the bounded in-memory pipe
+described above; raw output is never logged or shown. A five-minute deadline and
+task cancellation stop the directly launched `npx` process, with a forced stop
+after a grace period. Descendant work started by that process is not supervised
+and may continue.
 
 Lifecycle paths may not contain symbolic links. Install requires its exact
 destination to be absent before launch, then requires a real destination
