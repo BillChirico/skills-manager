@@ -8,6 +8,9 @@ import Foundation
 
 /// Performs supported skill lifecycle mutations through the official `skills` CLI.
 public protocol SkillManaging: Sendable {
+    /// Returns installation directory names whose global lock entries have changed upstream.
+    func checkForUpdates() async throws -> Set<String>
+
     /// Installs a catalog skill into a configured source and returns its directory.
     func install(_ skill: CatalogSkill, into source: SkillSource) async throws -> URL
 
@@ -18,6 +21,13 @@ public protocol SkillManaging: Sendable {
     func remove(_ skill: AgentSkill, from source: SkillSource) async throws
 }
 
+public extension SkillManaging {
+    /// Test and alternate managers that do not provide remote update discovery opt out safely.
+    func checkForUpdates() async throws -> Set<String> {
+        throw SkillsCLIError.updateCheckLockInvalid
+    }
+}
+
 /// A direct process invocation. Keeping the executable and argument vector separate
 /// prevents catalog or manifest values from ever being interpreted by a shell.
 struct ProcessCommand: Equatable, Sendable {
@@ -25,10 +35,29 @@ struct ProcessCommand: Equatable, Sendable {
     let arguments: [String]
     let environment: [String: String]
     let currentDirectoryURL: URL
+    let standardOutputURL: URL?
+    let maximumStandardOutputBytes: Int?
+
+    init(
+        executableURL: URL,
+        arguments: [String],
+        environment: [String: String],
+        currentDirectoryURL: URL,
+        standardOutputURL: URL? = nil,
+        maximumStandardOutputBytes: Int? = nil
+    ) {
+        self.executableURL = executableURL
+        self.arguments = arguments
+        self.environment = environment
+        self.currentDirectoryURL = currentDirectoryURL
+        self.standardOutputURL = standardOutputURL
+        self.maximumStandardOutputBytes = maximumStandardOutputBytes
+    }
 }
 
 protocol ProcessCommandRunning: Sendable {
-    func run(_ command: ProcessCommand) async throws
+    @discardableResult
+    func run(_ command: ProcessCommand) async throws -> Data?
 }
 
 struct FoundationProcessCommandRunner: ProcessCommandRunning {
@@ -43,13 +72,125 @@ struct FoundationProcessCommandRunner: ProcessCommandRunning {
         self.terminationGracePeriod = terminationGracePeriod
     }
 
-    func run(_ command: ProcessCommand) async throws {
+    @discardableResult
+    func run(_ command: ProcessCommand) async throws -> Data? {
+        guard
+            (command.standardOutputURL == nil && command.maximumStandardOutputBytes == nil)
+                || (command.standardOutputURL != nil && command.maximumStandardOutputBytes != nil)
+        else {
+            throw SkillsCLIError.commandCouldNotLaunch
+        }
+        let outputCapture: BoundedProcessOutputCapture?
+        do {
+            outputCapture = try BoundedProcessOutputCapture(command: command)
+        } catch {
+            throw SkillsCLIError.updateCheckOutputInvalid
+        }
+
         let execution = ProcessExecution(
             command: command,
+            standardOutputPipe: outputCapture?.pipe,
             timeout: timeout,
             terminationGracePeriod: terminationGracePeriod
         )
-        try await execution.run()
+        let captureTask = outputCapture.map { capture in
+            Task.detached(priority: .utility) {
+                try capture.collect(execution: execution)
+            }
+        }
+
+        do {
+            try await execution.run()
+            if let outputCapture, let captureTask {
+                let data = try await withThrowingTaskGroup(of: Data.self) { group in
+                    group.addTask {
+                        try await captureTask.value
+                    }
+                    group.addTask {
+                        try await Task.sleep(for: .seconds(1))
+                        outputCapture.cancel()
+                        throw SkillsCLIError.updateCheckOutputInvalid
+                    }
+
+                    guard let firstResult = try await group.next() else {
+                        throw SkillsCLIError.updateCheckOutputInvalid
+                    }
+                    group.cancelAll()
+                    return firstResult
+                }
+                try outputCapture.persist(data)
+                return data
+            }
+            return nil
+        } catch {
+            outputCapture?.cancel()
+            if let captureTask {
+                _ = await captureTask.result
+            }
+            throw error
+        }
+    }
+}
+
+private final class BoundedProcessOutputCapture: @unchecked Sendable {
+    let pipe = Pipe()
+    private let maximumBytes: Int
+    private let outputFile: FileHandle
+
+    init?(command: ProcessCommand) throws {
+        guard
+            let outputURL = command.standardOutputURL,
+            let maximumBytes = command.maximumStandardOutputBytes,
+            maximumBytes >= 0
+        else {
+            return nil
+        }
+        self.maximumBytes = maximumBytes
+        self.outputFile = try FileHandle(forWritingTo: outputURL)
+    }
+
+    func collect(execution: ProcessExecution) throws -> Data {
+        defer { try? pipe.fileHandleForReading.close() }
+        var output = Data()
+
+        do {
+            while let chunk = try pipe.fileHandleForReading.read(upToCount: 8_192),
+                chunk.isEmpty == false
+            {
+                guard
+                    output.count <= maximumBytes,
+                    chunk.count <= maximumBytes - output.count
+                else {
+                    execution.requestStop(because: .updateCheckOutputInvalid)
+                    throw SkillsCLIError.updateCheckOutputInvalid
+                }
+                output.append(chunk)
+            }
+        } catch let error as SkillsCLIError {
+            throw error
+        } catch {
+            execution.requestStop(because: .updateCheckOutputInvalid)
+            throw SkillsCLIError.updateCheckOutputInvalid
+        }
+
+        return output
+    }
+
+    func persist(_ data: Data) throws {
+        defer { try? outputFile.close() }
+
+        do {
+            try outputFile.truncate(atOffset: 0)
+            try outputFile.write(contentsOf: data)
+            try outputFile.synchronize()
+        } catch {
+            throw SkillsCLIError.updateCheckOutputInvalid
+        }
+    }
+
+    func cancel() {
+        try? pipe.fileHandleForReading.close()
+        try? outputFile.close()
     }
 }
 
@@ -58,6 +199,7 @@ struct FoundationProcessCommandRunner: ProcessCommandRunning {
 /// `Process` as Sendable even though this wrapper serializes every access.
 private final class ProcessExecution: @unchecked Sendable {
     private let process: Process
+    private let standardOutputPipe: Pipe?
     private let timeout: TimeInterval
     private let terminationGracePeriod: TimeInterval
     private let lock = NSLock()
@@ -71,6 +213,7 @@ private final class ProcessExecution: @unchecked Sendable {
 
     init(
         command: ProcessCommand,
+        standardOutputPipe: Pipe?,
         timeout: TimeInterval,
         terminationGracePeriod: TimeInterval
     ) {
@@ -80,16 +223,18 @@ private final class ProcessExecution: @unchecked Sendable {
         process.environment = command.environment
         process.currentDirectoryURL = command.currentDirectoryURL
         process.standardInput = FileHandle.nullDevice
-        process.standardOutput = FileHandle.nullDevice
+        process.standardOutput = standardOutputPipe?.fileHandleForWriting ?? FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
 
         self.process = process
+        self.standardOutputPipe = standardOutputPipe
         self.timeout = timeout
         self.terminationGracePeriod = terminationGracePeriod
     }
 
     func run() async throws {
         if Task.isCancelled {
+            closeStandardOutputWriter()
             throw SkillsCLIError.commandCancelled
         }
 
@@ -108,6 +253,7 @@ private final class ProcessExecution: @unchecked Sendable {
         if let requestedFailure {
             isComplete = true
             lock.unlock()
+            closeStandardOutputWriter()
             continuation.resume(throwing: requestedFailure)
             return
         }
@@ -120,11 +266,13 @@ private final class ProcessExecution: @unchecked Sendable {
         do {
             try process.run()
             didLaunch = true
+            closeStandardOutputWriter()
         } catch {
             isComplete = true
             self.continuation = nil
             process.terminationHandler = nil
             lock.unlock()
+            closeStandardOutputWriter()
             continuation.resume(throwing: SkillsCLIError.commandCouldNotLaunch)
             return
         }
@@ -141,7 +289,7 @@ private final class ProcessExecution: @unchecked Sendable {
         )
     }
 
-    private func requestStop(because failure: SkillsCLIError) {
+    fileprivate func requestStop(because failure: SkillsCLIError) {
         lock.lock()
         guard isComplete == false else {
             lock.unlock()
@@ -181,6 +329,10 @@ private final class ProcessExecution: @unchecked Sendable {
             deadline: .now() + max(terminationGracePeriod, 0),
             execute: forceTerminationWorkItem
         )
+    }
+
+    private func closeStandardOutputWriter() {
+        try? standardOutputPipe?.fileHandleForWriting.close()
     }
 
     private func forceTerminateIfNeeded(processIdentifier: Int32) {
@@ -255,6 +407,8 @@ public enum SkillsCLIError: Error, Equatable, LocalizedError, Sendable {
     case destinationAlreadyExists(URL)
     case unsafeNpxLocation
     case workingDirectoryUnavailable
+    case updateCheckLockInvalid
+    case updateCheckOutputInvalid
     case commandCouldNotLaunch
     case commandFailed(exitCode: Int32)
     case commandTimedOut
@@ -295,6 +449,10 @@ public enum SkillsCLIError: Error, Equatable, LocalizedError, Sendable {
             "Skills Manager cannot safely construct an executable search path for this npx installation."
         case .workingDirectoryUnavailable:
             "Skills Manager could not create a private working directory for the skills CLI."
+        case .updateCheckLockInvalid:
+            "Skills Manager could not safely read the global skills lock file, so update availability is unavailable."
+        case .updateCheckOutputInvalid:
+            "The skills CLI did not return a complete, recognized update result. No updates were reported."
         case .commandCouldNotLaunch:
             "Skills Manager could not launch npx. Verify that Node.js 22.20 or newer is installed."
         case .commandFailed(let exitCode):
@@ -378,6 +536,39 @@ public actor SkillsCLIManager: SkillManaging {
     /// The audited npm release used by every lifecycle command. The published
     /// tarball's SHA-512 integrity is recorded in `docs/SECURITY.md`.
     static let skillsPackageSpecifier = "skills@1.5.21"
+    static let maximumUpdateLockBytes = 1_048_576
+    static let maximumUpdateOutputBytes = 262_144
+
+    private struct UpdateLockFile: Codable, Sendable {
+        let version: Int
+        let skills: [String: UpdateLockEntry]
+    }
+
+    private struct UpdateLockEntry: Codable, Sendable {
+        let source: String
+        let sourceType: String
+        let sourceUrl: String
+        let ref: String?
+        let skillPath: String?
+        let skillFolderHash: String
+        let installedAt: String
+        let updatedAt: String
+        let pluginName: String?
+    }
+
+    private struct UpdateSourceIdentity: Equatable {
+        let sourceType: String
+        let sourceURL: String
+        let ref: String?
+    }
+
+    private enum UpdateOutputPhase: Equatable {
+        case header
+        case sources
+        case updating
+        case updated(String)
+        case complete
+    }
 
     private struct CLITarget: Sendable {
         let agentIdentifier: String
@@ -425,6 +616,95 @@ public actor SkillsCLIManager: SkillManaging {
         self.npxExecutableURL = npxExecutableURL?.standardizedFileURL
         self.parentEnvironment = parentEnvironment
         self.initializationError = nil
+    }
+
+    public func checkForUpdates() async throws -> Set<String> {
+        await beginOperation()
+        defer { finishOperation() }
+
+        if let initializationError {
+            throw initializationError
+        }
+        try Task.checkCancellation()
+
+        let lock = try validatedUpdateLock()
+        guard lock.skills.isEmpty == false else {
+            return []
+        }
+        guard let npxExecutableURL else {
+            throw SkillsCLIError.npxNotFound
+        }
+
+        let isolatedHome = try makePrivateTemporaryDirectory(prefix: "SkillsManager-Check-Home")
+        defer { try? FileManager.default.removeItem(at: isolatedHome) }
+        try writeCanonicalUpdateLock(lock, to: isolatedHome)
+        let isolatedTemporaryDirectory = isolatedHome.appending(
+            path: "tmp",
+            directoryHint: .isDirectory
+        )
+        do {
+            try FileManager.default.createDirectory(
+                at: isolatedTemporaryDirectory,
+                withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700]
+            )
+        } catch {
+            throw SkillsCLIError.workingDirectoryUnavailable
+        }
+
+        let workingDirectory = try makePrivateTemporaryDirectory(prefix: "SkillsManager-Check-CLI")
+        defer { try? FileManager.default.removeItem(at: workingDirectory) }
+        let outputURL = workingDirectory.appending(
+            path: "update-check.stdout",
+            directoryHint: .notDirectory
+        )
+        guard
+            FileManager.default.createFile(
+                atPath: outputURL.path(percentEncoded: false),
+                contents: Data(),
+                attributes: [.posixPermissions: 0o600]
+            )
+        else {
+            throw SkillsCLIError.workingDirectoryUnavailable
+        }
+
+        var environment = try sanitizedEnvironment(
+            npxExecutableURL: npxExecutableURL,
+            workingDirectory: workingDirectory,
+            homeDirectory: isolatedHome
+        )
+        environment["CODEX_HOME"] = isolatedHome.appending(
+            path: ".agents",
+            directoryHint: .isDirectory
+        ).path(percentEncoded: false)
+        environment["TMPDIR"] = isolatedTemporaryDirectory.path(percentEncoded: false)
+
+        let output = try await runner.run(
+            ProcessCommand(
+                executableURL: npxExecutableURL,
+                arguments: [
+                    "--yes",
+                    "--package",
+                    Self.skillsPackageSpecifier,
+                    "--",
+                    "skills",
+                    "check",
+                    "--global",
+                    "--yes",
+                ],
+                environment: environment,
+                currentDirectoryURL: workingDirectory,
+                standardOutputURL: outputURL,
+                maximumStandardOutputBytes: Self.maximumUpdateOutputBytes
+            )
+        )
+
+        let boundedOutput = try boundedUpdateOutput(output)
+        return try Self.parseUpdateOutput(
+            boundedOutput,
+            expectedSkillNames: Set(lock.skills.keys),
+            expectedSources: Set(lock.skills.values.map(\.source))
+        )
     }
 
     public func install(_ skill: CatalogSkill, into source: SkillSource) async throws -> URL {
@@ -670,10 +950,11 @@ public actor SkillsCLIManager: SkillManaging {
 
     private func sanitizedEnvironment(
         npxExecutableURL: URL,
-        workingDirectory: URL
+        workingDirectory: URL,
+        homeDirectory environmentHomeDirectory: URL? = nil
     ) throws -> [String: String] {
         var environment: [String: String] = [
-            "HOME": homeDirectory.path(percentEncoded: false),
+            "HOME": (environmentHomeDirectory ?? homeDirectory).path(percentEncoded: false),
             "DISABLE_TELEMETRY": "1",
             "DO_NOT_TRACK": "1",
             "NO_COLOR": "1",
@@ -723,6 +1004,364 @@ public actor SkillsCLIManager: SkillManaging {
             .joined(separator: ":")
 
         return environment
+    }
+
+    private func validatedUpdateLock() throws -> UpdateLockFile {
+        let lockURL = homeDirectory.appending(
+            path: ".agents/.skill-lock.json",
+            directoryHint: .notDirectory
+        )
+
+        do {
+            try rejectSymbolicLinks(from: homeDirectory, through: lockURL)
+        } catch {
+            throw SkillsCLIError.updateCheckLockInvalid
+        }
+        guard fileSystemEntry(at: lockURL) == .regularFile else {
+            throw SkillsCLIError.updateCheckLockInvalid
+        }
+
+        let lockPath = lockURL.path(percentEncoded: false)
+        guard
+            let attributes = try? FileManager.default.attributesOfItem(atPath: lockPath),
+            let size = attributes[.size] as? NSNumber,
+            size.intValue <= Self.maximumUpdateLockBytes,
+            let data = try? Data(contentsOf: lockURL, options: [.mappedIfSafe]),
+            data.count <= Self.maximumUpdateLockBytes,
+            let lock = try? JSONDecoder().decode(UpdateLockFile.self, from: data),
+            lock.version == 3,
+            lock.skills.count <= 10_000
+        else {
+            throw SkillsCLIError.updateCheckLockInvalid
+        }
+
+        var sourceIdentities: [String: UpdateSourceIdentity] = [:]
+        for (name, entry) in lock.skills {
+            guard
+                CatalogIdentifier.validatedInstallationDirectoryName(name) == name,
+                Self.isSafeLockString(entry.source, maximumLength: 2_048),
+                ["github", "gitlab", "git"].contains(entry.sourceType),
+                Self.isSafeRemoteSource(entry),
+                Self.isSafeRelativeSkillPath(entry.skillPath),
+                Self.isSafeFolderHash(entry.skillFolderHash),
+                Self.isSafeLockString(entry.installedAt, maximumLength: 64),
+                Self.isSafeLockString(entry.updatedAt, maximumLength: 64),
+                entry.ref.map({ Self.isSafeLockString($0, maximumLength: 512) }) ?? true,
+                entry.pluginName.map({ Self.isSafeLockString($0, maximumLength: 256) }) ?? true
+            else {
+                throw SkillsCLIError.updateCheckLockInvalid
+            }
+
+            let sourceIdentity = UpdateSourceIdentity(
+                sourceType: entry.sourceType,
+                sourceURL: entry.sourceUrl,
+                ref: entry.ref
+            )
+            if let existingIdentity = sourceIdentities[entry.source] {
+                guard existingIdentity == sourceIdentity else {
+                    throw SkillsCLIError.updateCheckLockInvalid
+                }
+            } else {
+                sourceIdentities[entry.source] = sourceIdentity
+            }
+        }
+
+        return lock
+    }
+
+    private func writeCanonicalUpdateLock(
+        _ lock: UpdateLockFile,
+        to isolatedHome: URL
+    ) throws {
+        let agentsDirectory = isolatedHome.appending(
+            path: ".agents",
+            directoryHint: .isDirectory
+        )
+        let lockURL = agentsDirectory.appending(
+            path: ".skill-lock.json",
+            directoryHint: .notDirectory
+        )
+
+        do {
+            try FileManager.default.createDirectory(
+                at: agentsDirectory,
+                withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700]
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(lock).write(to: lockURL, options: [.atomic])
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: lockURL.path(percentEncoded: false)
+            )
+        } catch {
+            throw SkillsCLIError.workingDirectoryUnavailable
+        }
+    }
+
+    private func boundedUpdateOutput(_ data: Data?) throws -> Data {
+        guard let data, data.count <= Self.maximumUpdateOutputBytes else {
+            throw SkillsCLIError.updateCheckOutputInvalid
+        }
+
+        return data
+    }
+
+    private static func parseUpdateOutput(
+        _ data: Data,
+        expectedSkillNames: Set<String>,
+        expectedSources: Set<String>
+    ) throws -> Set<String> {
+        guard var output = String(data: data, encoding: .utf8) else {
+            throw SkillsCLIError.updateCheckOutputInvalid
+        }
+
+        for sequence in [
+            "\u{1B}[0m",
+            "\u{1B}[1m",
+            "\u{1B}[38;5;102m",
+            "\u{1B}[38;5;145m",
+            "\u{1B}[K",
+        ] {
+            output = output.replacingOccurrences(of: sequence, with: "")
+        }
+        output = output.replacingOccurrences(of: "\r", with: "")
+
+        guard
+            output.unicodeScalars.allSatisfy({ scalar in
+                scalar.value == 0x0A
+                    || (scalar.value >= 0x20 && scalar.value != 0x7F
+                        && (0x80...0x9F).contains(scalar.value) == false)
+            })
+        else {
+            throw SkillsCLIError.updateCheckOutputInvalid
+        }
+
+        let lines = output.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        var phase = UpdateOutputPhase.header
+        var checkedSources = Set<String>()
+        var expectedUpdateCount: Int?
+        var updatedNames = Set<String>()
+
+        for line in lines {
+            switch phase {
+            case .header:
+                guard line == "Checking for skill updates…" else {
+                    throw SkillsCLIError.updateCheckOutputInvalid
+                }
+                phase = .sources
+
+            case .sources:
+                if let source = matchedValue(
+                    in: line,
+                    prefix: "Checking skills from source: ",
+                    suffix: ""
+                ) {
+                    guard
+                        expectedSources.contains(source),
+                        checkedSources.insert(source).inserted
+                    else {
+                        throw SkillsCLIError.updateCheckOutputInvalid
+                    }
+                    continue
+                }
+
+                guard checkedSources == expectedSources else {
+                    throw SkillsCLIError.updateCheckOutputInvalid
+                }
+
+                if line == "✓ All global skills are up to date" {
+                    phase = .complete
+                } else if let count = matchedCount(
+                    in: line,
+                    prefix: "Found ",
+                    suffix: " global update(s)"
+                ) {
+                    guard count > 0, count <= expectedSkillNames.count else {
+                        throw SkillsCLIError.updateCheckOutputInvalid
+                    }
+                    expectedUpdateCount = count
+                    phase = .updating
+                } else {
+                    throw SkillsCLIError.updateCheckOutputInvalid
+                }
+
+            case .updating:
+                guard let expectedUpdateCount else {
+                    throw SkillsCLIError.updateCheckOutputInvalid
+                }
+
+                if updatedNames.count == expectedUpdateCount {
+                    guard
+                        matchedCount(
+                            in: line,
+                            prefix: "✓ Updated ",
+                            suffix: " skill(s)"
+                        ) == expectedUpdateCount
+                    else {
+                        throw SkillsCLIError.updateCheckOutputInvalid
+                    }
+                    phase = .complete
+                    continue
+                }
+
+                guard
+                    let name = matchedValue(in: line, prefix: "Updating ", suffix: "…"),
+                    expectedSkillNames.contains(name),
+                    updatedNames.contains(name) == false
+                else {
+                    throw SkillsCLIError.updateCheckOutputInvalid
+                }
+                phase = .updated(name)
+
+            case .updated(let pendingName):
+                guard
+                    matchedValue(in: line, prefix: "  ✓ Updated ", suffix: "") == pendingName,
+                    updatedNames.insert(pendingName).inserted
+                else {
+                    throw SkillsCLIError.updateCheckOutputInvalid
+                }
+                phase = .updating
+
+            case .complete:
+                throw SkillsCLIError.updateCheckOutputInvalid
+            }
+        }
+
+        guard phase == .complete, checkedSources == expectedSources else {
+            throw SkillsCLIError.updateCheckOutputInvalid
+        }
+
+        return updatedNames
+    }
+
+    private static func matchedValue(
+        in line: String,
+        prefix: String,
+        suffix: String
+    ) -> String? {
+        guard line.hasPrefix(prefix), line.hasSuffix(suffix) else {
+            return nil
+        }
+
+        let valueStart = line.index(line.startIndex, offsetBy: prefix.count)
+        let valueEnd = line.index(line.endIndex, offsetBy: -suffix.count)
+        guard valueStart < valueEnd else {
+            return nil
+        }
+        return String(line[valueStart..<valueEnd])
+    }
+
+    private static func matchedCount(
+        in line: String,
+        prefix: String,
+        suffix: String
+    ) -> Int? {
+        guard let value = matchedValue(in: line, prefix: prefix, suffix: suffix) else {
+            return nil
+        }
+        return Int(value)
+    }
+
+    private static func isSafeLockString(_ value: String, maximumLength: Int) -> Bool {
+        value.isEmpty == false
+            && value.utf8.count <= maximumLength
+            && value.unicodeScalars.allSatisfy { scalar in
+                scalar.value >= 0x20
+                    && scalar.value != 0x7F
+                    && (0x80...0x9F).contains(scalar.value) == false
+            }
+    }
+
+    private static func isSafeRemoteSourceURL(_ value: String) -> Bool {
+        guard
+            isSafeLockString(value, maximumLength: 4_096),
+            let components = URLComponents(string: value),
+            components.scheme?.lowercased() == "https",
+            components.host?.isEmpty == false,
+            components.user == nil,
+            components.password == nil,
+            components.query == nil,
+            components.fragment == nil
+        else {
+            return false
+        }
+        return true
+    }
+
+    private static func isSafeRemoteSource(_ entry: UpdateLockEntry) -> Bool {
+        guard
+            isSafeRemoteSourceURL(entry.sourceUrl),
+            let components = URLComponents(string: entry.sourceUrl),
+            let host = components.host,
+            components.percentEncodedPath.hasPrefix("/"),
+            components.percentEncodedPath.hasSuffix("/") == false,
+            components.percentEncodedPath.contains("%") == false
+        else {
+            return false
+        }
+
+        var repositoryPath = String(components.percentEncodedPath.dropFirst())
+        if repositoryPath.hasSuffix(".git") {
+            repositoryPath.removeLast(4)
+        }
+        let pathComponents = repositoryPath.split(separator: "/", omittingEmptySubsequences: false)
+        guard
+            pathComponents.count >= 2,
+            pathComponents.allSatisfy({ isSafeRemotePathComponent($0) })
+        else {
+            return false
+        }
+
+        if entry.sourceType == "github" {
+            return host.caseInsensitiveCompare("github.com") == .orderedSame
+                && components.port == nil
+                && pathComponents.count == 2
+                && entry.source == repositoryPath
+        }
+
+        return entry.source == entry.sourceUrl || entry.source == repositoryPath
+    }
+
+    private static func isSafeRemotePathComponent(_ component: Substring) -> Bool {
+        component.isEmpty == false
+            && component != "."
+            && component != ".."
+            && component.utf8.count <= 256
+            && component.utf8.allSatisfy { byte in
+                (0x30...0x39).contains(byte)
+                    || (0x41...0x5A).contains(byte)
+                    || (0x61...0x7A).contains(byte)
+                    || byte == 0x2D
+                    || byte == 0x2E
+                    || byte == 0x5F
+            }
+    }
+
+    private static func isSafeFolderHash(_ value: String) -> Bool {
+        [40, 64].contains(value.utf8.count)
+            && value.utf8.allSatisfy { byte in
+                (0x30...0x39).contains(byte)
+                    || (0x41...0x46).contains(byte)
+                    || (0x61...0x66).contains(byte)
+            }
+    }
+
+    private static func isSafeRelativeSkillPath(_ value: String?) -> Bool {
+        guard
+            let value,
+            isSafeLockString(value, maximumLength: 4_096),
+            value.hasPrefix("/") == false,
+            value.contains("\\") == false
+        else {
+            return false
+        }
+
+        let components = value.split(separator: "/", omittingEmptySubsequences: false)
+        return components.isEmpty == false
+            && components.last == "SKILL.md"
+            && components.allSatisfy { $0.isEmpty == false && $0 != "." && $0 != ".." }
     }
 
     private enum FileSystemEntry {
@@ -848,8 +1487,12 @@ public actor SkillsCLIManager: SkillManaging {
     }
 
     private func makePrivateWorkingDirectory() throws -> URL {
+        try makePrivateTemporaryDirectory(prefix: "SkillsManager-CLI")
+    }
+
+    private func makePrivateTemporaryDirectory(prefix: String) throws -> URL {
         let directory = FileManager.default.temporaryDirectory.appending(
-            path: "SkillsManager-CLI-\(UUID().uuidString)",
+            path: "\(prefix)-\(UUID().uuidString)",
             directoryHint: .isDirectory
         )
 

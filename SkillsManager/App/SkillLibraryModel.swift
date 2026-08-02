@@ -11,6 +11,13 @@ final class SkillLibraryModel {
         case unavailable
     }
 
+    enum UpdateCheckState: Hashable {
+        case idle
+        case checking
+        case current
+        case unavailable
+    }
+
     struct PresentedError: Identifiable {
         let id = UUID()
         let title: String
@@ -44,6 +51,11 @@ final class SkillLibraryModel {
         let message: String
     }
 
+    private struct SourceRestoreResult {
+        let sourcesToScan: [SkillSource]
+        let shouldCheckForUpdates: Bool
+    }
+
     private(set) var sources: [SkillSource]
     private(set) var skills: [AgentSkill]
     private(set) var sourceStates: [SkillSource.ID: SourceState]
@@ -59,6 +71,7 @@ final class SkillLibraryModel {
     var sortOrder: SkillSortOrder
     var presentedError: PresentedError?
     private(set) var mutatingSkillIDs: Set<AgentSkill.ID> = []
+    private(set) var updateCheckState: UpdateCheckState = .idle
 
     @ObservationIgnored private let sourceStore: (any SkillSourceStore)?
     @ObservationIgnored private let discoverer: (any SkillDiscovering)?
@@ -221,15 +234,21 @@ final class SkillLibraryModel {
 
     func restoreSources() async {
         // try? handles CancellationError thrown when task is cancelled before execution
-        let sourcesToScan =
-            (try? await withSerializedSourceMutation { () -> [SkillSource] in
+        let restoreResult =
+            (try? await withSerializedSourceMutation { () -> SourceRestoreResult in
                 guard hasRestoredSources == false else {
-                    return []
+                    return SourceRestoreResult(
+                        sourcesToScan: [],
+                        shouldCheckForUpdates: false
+                    )
                 }
                 hasRestoredSources = true
 
                 guard let sourceStore else {
-                    return []
+                    return SourceRestoreResult(
+                        sourcesToScan: [],
+                        shouldCheckForUpdates: true
+                    )
                 }
 
                 do {
@@ -338,14 +357,21 @@ final class SkillLibraryModel {
                         }
                     }
 
-                    return restoredSourcesToScan
+                    return SourceRestoreResult(
+                        sourcesToScan: restoredSourcesToScan,
+                        shouldCheckForUpdates: true
+                    )
                 } catch {
                     report(error, title: "Unable to Restore Directories")
-                    return []
+                    return SourceRestoreResult(
+                        sourcesToScan: [],
+                        shouldCheckForUpdates: true
+                    )
                 }
-            }) ?? []
+            })
+            ?? SourceRestoreResult(sourcesToScan: [], shouldCheckForUpdates: false)
 
-        for source in sourcesToScan {
+        for source in restoreResult.sourcesToScan {
             do {
                 try await rescanSource(source.id)
             } catch {
@@ -354,6 +380,41 @@ final class SkillLibraryModel {
                     title: "Unable to Scan \(source.displayName)"
                 )
             }
+        }
+
+        if restoreResult.shouldCheckForUpdates {
+            await refreshUpdateAvailability()
+        }
+    }
+
+    func refreshUpdateAvailability() async {
+        guard let skillManager else {
+            updateCheckState = .idle
+            return
+        }
+
+        updateCheckState = .checking
+        for index in skills.indices {
+            skills[index].isUpdateAvailable = false
+        }
+
+        do {
+            let updateNames = try await skillManager.checkForUpdates()
+            try Task.checkCancellation()
+
+            for index in skills.indices {
+                skills[index].isUpdateAvailable = updateNames.contains(
+                    skills[index].directoryURL.lastPathComponent
+                )
+            }
+            updateCheckState = .current
+        } catch is CancellationError {
+            updateCheckState = .idle
+        } catch let error as SkillsCLIError where error == .commandCancelled {
+            updateCheckState = .idle
+        } catch {
+            updateCheckState = .unavailable
+            report(error, title: "Unable to Check for Updates")
         }
     }
 
@@ -652,6 +713,7 @@ final class SkillLibraryModel {
                 var merged = discoveredSkill
                 merged.isEnabled = existing.isEnabled
                 merged.availableVersion = existing.availableVersion
+                merged.isUpdateAvailable = existing.isUpdateAvailable
                 return merged
             }
 

@@ -87,6 +87,12 @@ struct SkillList: View {
                 Button("Search All Skills") {
                     model.searchAllSkills()
                 }
+            case .checkForUpdates:
+                Button("Check Again") {
+                    Task { @MainActor in
+                        await model.refreshUpdateAvailability()
+                    }
+                }
             case nil:
                 EmptyView()
             }
@@ -218,12 +224,36 @@ struct SkillList: View {
                 action: .rescan(sourceID)
             )
         case .updatesAvailable:
-            return EmptyContent(
-                title: "All Skills Are Up to Date",
-                systemImage: "checkmark.circle",
-                description: "There are no updates available.",
-                action: nil
-            )
+            switch model.updateCheckState {
+            case .idle:
+                return EmptyContent(
+                    title: "Updates Not Checked",
+                    systemImage: "arrow.clockwise.circle",
+                    description: "Check the tracked skills for available updates.",
+                    action: .checkForUpdates
+                )
+            case .checking:
+                return EmptyContent(
+                    title: "Checking for Updates",
+                    systemImage: "arrow.triangle.2.circlepath.circle",
+                    description: "Comparing tracked skills with their remote sources.",
+                    action: nil
+                )
+            case .current:
+                return EmptyContent(
+                    title: "All Skills Are Up to Date",
+                    systemImage: "checkmark.circle",
+                    description: "There are no updates available.",
+                    action: nil
+                )
+            case .unavailable:
+                return EmptyContent(
+                    title: "Update Status Unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description: "Skills Manager could not safely determine update availability.",
+                    action: .checkForUpdates
+                )
+            }
         case .disabled:
             return EmptyContent(
                 title: "No Disabled Skills",
@@ -305,9 +335,19 @@ private struct SkillRow: View {
                 }
 
                 if skill.hasUpdate {
-                    Image(systemName: "arrow.down.circle")
+                    Label("Update", systemImage: "arrow.down.circle.fill")
+                        .font(.caption)
+                        .bold()
                         .foregroundStyle(isSelected ? Color.white : Color.accentColor)
-                        .accessibilityLabel("Update available")
+                        .padding(.horizontal, SkillsManagerSpacing.small)
+                        .padding(.vertical, SkillsManagerSpacing.extraSmall)
+                        .background(
+                            isSelected
+                                ? Color.white.opacity(0.18)
+                                : Color.accentColor.opacity(0.12),
+                            in: .capsule
+                        )
+                        .accessibilityHidden(true)
                 }
 
                 if skill.isEnabled == false {
@@ -344,6 +384,7 @@ private struct EmptyContent {
         case manageFolders
         case rescan(SkillSource.ID)
         case searchAll
+        case checkForUpdates
     }
 
     let title: String

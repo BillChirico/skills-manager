@@ -30,6 +30,10 @@ public enum SkillLibrarySorter {
         )
 
         return skills.sorted { lhs, rhs in
+            if lhs.hasUpdate != rhs.hasUpdate {
+                return lhs.hasUpdate
+            }
+
             switch order {
             case .name:
                 return nameComesFirst(lhs, rhs)
@@ -64,6 +68,10 @@ public enum SkillLibrarySorter {
             return comparison == .orderedAscending
         }
 
-        return lhs.id.relativePath < rhs.id.relativePath
+        if lhs.id.relativePath != rhs.id.relativePath {
+            return lhs.id.relativePath < rhs.id.relativePath
+        }
+
+        return lhs.sourceID.uuidString < rhs.sourceID.uuidString
     }
 }

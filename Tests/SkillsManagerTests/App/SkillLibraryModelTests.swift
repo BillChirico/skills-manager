@@ -203,6 +203,92 @@ struct SkillLibraryModelTests {
         #expect(model.sourceState(for: persistedSource.id) == .available)
     }
 
+    @Test("Restoring sources applies one authoritative update availability result")
+    func restoreChecksForUpdates() async throws {
+        let persistedSource = SkillSource(
+            name: "Team Skills",
+            directoryURL: URL(filePath: "/skills/team")
+        )
+        let manager = UpdateAvailabilityManager(result: .success(["discovered"]))
+        let model = makeModel(
+            sourceStore: MemorySourceStore(sources: [persistedSource]),
+            discoverer: FixtureDiscoverer(),
+            skillManager: manager
+        )
+
+        await model.restoreSources()
+        await model.restoreSources()
+
+        let skill = try #require(model.skills.first)
+        #expect(skill.hasUpdate)
+        #expect(skill.isUpdateAvailable == true)
+        #expect(model.updateCheckState == .current)
+        #expect(await manager.checkCount == 1)
+    }
+
+    @Test("An ambiguous update result clears positive claims and reports unavailable state")
+    func updateCheckFailureFailsClosed() async throws {
+        let persistedSource = SkillSource(
+            name: "Team Skills",
+            directoryURL: URL(filePath: "/skills/team")
+        )
+        let manager = UpdateAvailabilityManager(result: .failure)
+        let model = makeModel(
+            sourceStore: MemorySourceStore(sources: [persistedSource]),
+            discoverer: FixtureDiscoverer(),
+            skillManager: manager
+        )
+
+        await model.restoreSources()
+
+        let skill = try #require(model.skills.first)
+        #expect(skill.hasUpdate == false)
+        #expect(skill.isUpdateAvailable == false)
+        #expect(model.updateCheckState == .unavailable)
+        #expect(model.presentedError?.title == "Unable to Check for Updates")
+    }
+
+    @Test("A cancelled update check clears positive claims without reporting an error")
+    func updateCheckCancellationReturnsToIdle() async throws {
+        let persistedSource = SkillSource(
+            name: "Team Skills",
+            directoryURL: URL(filePath: "/skills/team")
+        )
+        let manager = UpdateAvailabilityManager(result: .cancelled)
+        let model = makeModel(
+            sourceStore: MemorySourceStore(sources: [persistedSource]),
+            discoverer: FixtureDiscoverer(),
+            skillManager: manager
+        )
+
+        await model.restoreSources()
+
+        let skill = try #require(model.skills.first)
+        #expect(skill.hasUpdate == false)
+        #expect(skill.isUpdateAvailable == false)
+        #expect(model.updateCheckState == .idle)
+        #expect(model.presentedError == nil)
+    }
+
+    @Test("A rescan preserves the last authoritative update result")
+    func rescanPreservesUpdateAvailability() async throws {
+        let persistedSource = SkillSource(
+            name: "Team Skills",
+            directoryURL: URL(filePath: "/skills/team")
+        )
+        let manager = UpdateAvailabilityManager(result: .success(["discovered"]))
+        let model = makeModel(
+            sourceStore: MemorySourceStore(sources: [persistedSource]),
+            discoverer: FixtureDiscoverer(),
+            skillManager: manager
+        )
+        await model.restoreSources()
+
+        try await model.rescanSource(persistedSource.id)
+
+        #expect(model.skills.first?.isUpdateAvailable == true)
+    }
+
     @Test("Restoring automatically adds and scans existing standard agent folders")
     func restoreAddsExistingStandardAgentFolders() async {
         let homeDirectory = URL(
@@ -1473,6 +1559,7 @@ struct SkillLibraryModelTests {
     private func makeModel(
         sourceStore: any SkillSourceStore = MemorySourceStore(),
         discoverer: any SkillDiscovering = EmptyDiscoverer(),
+        skillManager: (any SkillManaging)? = nil,
         homeDirectory: URL? = nil,
         directoryExists: @escaping @Sendable (URL) -> Bool = { _ in false }
     ) -> SkillLibraryModel {
@@ -1481,6 +1568,7 @@ struct SkillLibraryModelTests {
             discoverer: discoverer,
             bookmarker: StubBookmarker(),
             sourceAccess: StubSourceAccess(),
+            skillManager: skillManager,
             homeDirectory: homeDirectory,
             directoryExists: directoryExists
         )
@@ -1795,6 +1883,47 @@ private actor RecordingLifecycleManager: SkillManaging {
             throw ManagerError()
         }
     }
+}
+
+private actor UpdateAvailabilityManager: SkillManaging {
+    enum Result: Sendable {
+        case success(Set<String>)
+        case failure
+        case cancelled
+    }
+
+    struct CheckError: LocalizedError {
+        var errorDescription: String? {
+            "The update transcript was not recognized."
+        }
+    }
+
+    private let result: Result
+    private(set) var checkCount = 0
+
+    init(result: Result) {
+        self.result = result
+    }
+
+    func checkForUpdates() async throws -> Set<String> {
+        checkCount += 1
+        switch result {
+        case .success(let names):
+            return names
+        case .failure:
+            throw CheckError()
+        case .cancelled:
+            throw SkillsCLIError.commandCancelled
+        }
+    }
+
+    func install(_ skill: CatalogSkill, into source: SkillSource) async throws -> URL {
+        source.directoryURL.appending(path: skill.slug, directoryHint: .isDirectory)
+    }
+
+    func update(_ skill: AgentSkill, in source: SkillSource) async throws {}
+
+    func remove(_ skill: AgentSkill, from source: SkillSource) async throws {}
 }
 
 private actor SuspendingLifecycleManager: SkillManaging {
