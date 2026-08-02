@@ -59,6 +59,21 @@ hand-off when full Xcode is available. If Xcode is unavailable, run
 - Suggest a standard agent location only while it exists on disk, and add it
   directly instead of reopening a picker the user already answered. Keep one
   generic picker action for every other folder rather than a per-agent list.
+- Detect and configure every supported agent's standard directory that exists
+  under the account home once per launch, in
+  `SkillLibraryModel.restoreSources()`. Persist a folder the user removes as a
+  durable exclusion so it does not reappear on the next launch, and clear that
+  exclusion only when the same physical directory is added back. Use a
+  symlink-resolved, directory-normalized canonical key for automatic
+  de-duplication and exclusions while preserving the user-selected source URL
+  for display and access. Inject the account home and a directory-existence
+  closure so tests never touch a developer's real home directory.
+- During restoration, coalesce persisted source aliases with the same canonical
+  directory key while preserving the first source, and canonicalize persisted
+  exclusions. Publish the loaded and reconciled configuration in memory before
+  attempting its normalization save. Report a save failure without discarding
+  or withholding scans of restored sources; the next successful source mutation
+  must persist the complete in-memory configuration.
 - Resolve the account home through `UserHomeDirectory`, never
   `FileManager.homeDirectoryForCurrentUser`, so suggestions, display paths, and
   CLI operations use one authoritative location. If account-home resolution
@@ -107,10 +122,18 @@ output, or user-specific absolute paths. Keep process standard input, output,
 and error disconnected unless a separately reviewed UI securely presents a
 bounded diagnostic.
 
-When a source mutation rolls back after a failed save, re-resolve the target by
-`SkillSource.ID` inside the `catch`. An index captured before the `await` can be
-stale, because awaiting the save yields the main actor and lets another mutation
-reorder or shrink `sources`. Never widen the permissions of the store file.
+Serialize source-configuration mutations across their persistence commit or
+rollback; MainActor isolation alone is reentrant across an `await`. Release that
+mutation boundary before post-commit filesystem scans, and make each scan
+revalidate the source ID, enabled state, and standardized directory URL after
+discovery returns. When a source mutation rolls back, re-resolve its target by
+`SkillSource.ID` and restore only that source's deltas; never replace whole
+skill, state, or selection collections that ungated UI and scan work may have
+changed during the save. Normalize a rolled-back `.scanning` source to
+`.available`; the scan may have already exited after observing the transient
+removal or relocation. Write source configuration to an owner-only temporary
+file and set permissions before the atomic rename, so no fallible permission
+step remains after the commit.
 
 When the account home is available, the abbreviated `~/…` display path keeps the
 account name off screen. Do not pass a raw absolute path to a tooltip, label, or

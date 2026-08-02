@@ -70,6 +70,48 @@ that attempting `skills update --agent codex --global --yes` does not add an
 agent boundary: `--agent` is ignored by the update parser and `codex` is treated
 as a positional skill-name filter.
 
+## Automatic source discovery and persistence
+
+At launch, when `UserHomeDirectory` can resolve the signed-in account home from
+the password database, Skills Manager checks only these fixed, home-relative
+standard skill directories:
+
+- Global and Codex: `~/.agents/skills`;
+- Claude Code: `~/.claude/skills`;
+- Cursor: `~/.cursor/skills`;
+- GitHub Copilot: `~/.copilot/skills`; and
+- Gemini: `~/.gemini/skills`.
+
+Global and Codex intentionally share one directory and therefore produce one
+configured source. Automatic discovery does not traverse the account home or
+search outside these candidates. A candidate is configured only when it exists
+as a directory. Scanning then enumerates one direct-child level, skips hidden
+entries and non-directories, and accepts only child directories containing a
+`SKILL.md`. Discovery reads skill metadata and content for presentation but does
+not write, move, or delete skill contents.
+
+The `sources.json` configuration stores both configured sources and durable
+automatic-directory exclusions. Removing an automatically recognized standard
+directory records its identity as an exclusion so it does not return at the next
+launch. Explicitly adding the same physical directory removes that exclusion.
+
+Automatic deduplication and exclusions use a canonical identity that resolves
+symbolic links, normalizes the path, and applies directory URL semantics. This
+means, for example, that a dotfiles target selected in the folder picker and a
+standard path that is a symbolic link to that target represent the same physical
+directory. Persisted source aliases that resolve to the same identity are
+coalesced when loaded, preserving the first configured source and its
+user-selected URL. Persisted exclusion identities are also canonicalized on
+load, and restoration then attempts to save the normalized configuration.
+Configured source URLs remain in their user-selected form for display and
+filesystem access; canonicalization applies only to internal identity keys.
+
+Restoration publishes a successfully loaded and reconciled configuration to the
+in-memory library before attempting to save reconciliation changes. If that save
+fails, the app reports the failure without discarding the loaded or automatically
+detected sources. A later successful source mutation persists the complete
+in-memory configuration, including those sources and exclusions.
+
 ## Local containment and availability
 
 Only standard account-home-relative agent directories are mutable. Existing

@@ -25,7 +25,9 @@ struct SkillsManagerApp: App {
             initialValue: SkillLibraryModel(
                 sourceStore: sourceStore,
                 discoverer: FileSystemSkillDiscoverer(),
-                skillManager: skillsCLIManager
+                skillManager: skillsCLIManager,
+                homeDirectory: UserHomeDirectory.current,
+                directoryExists: AgentDirectorySuggestion.directoryExists(at:)
             )
         )
         _catalogModel = State(
