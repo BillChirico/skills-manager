@@ -215,4 +215,64 @@ struct JSONSkillSourceStoreTests {
 
         #expect(loaded == SkillSourceConfiguration())
     }
+
+    @Test("Saving sources over a corrupt file falls back to empty exclusions")
+    func saveSourcesOverCorruptFileSucceeds() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(
+            path: "SkillsCoreStoreTests-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let fileURL = directory.appending(
+            path: "sources.json",
+            directoryHint: .notDirectory
+        )
+        try Data("corrupt json".utf8).write(to: fileURL)
+
+        let store = JSONSkillSourceStore(fileURL: fileURL)
+        let source = SkillSource(
+            name: "Recovered Source",
+            directoryURL: URL(filePath: "/skills/recovered")
+        )
+
+        try await store.save([source])
+        let loaded = try await store.loadConfiguration()
+
+        #expect(loaded.sources == [source])
+        #expect(loaded.excludedAutomaticDirectoryURLs.isEmpty)
+    }
+
+    @Test("Saving sources propagates transient I/O errors when reading fails")
+    func saveSourcesPropagatesIOErrors() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(
+            path: "SkillsCoreStoreTests-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let fileURL = directory.appending(
+            path: "sources.json",
+            directoryHint: .isDirectory
+        )
+        try FileManager.default.createDirectory(at: fileURL, withIntermediateDirectories: true)
+
+        let store = JSONSkillSourceStore(fileURL: fileURL)
+        let source = SkillSource(
+            name: "Test Source",
+            directoryURL: URL(filePath: "/skills/test")
+        )
+
+        await #expect(throws: (any Error).self) {
+            try await store.save([source])
+        }
+    }
 }

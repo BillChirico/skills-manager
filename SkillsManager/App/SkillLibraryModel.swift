@@ -806,6 +806,9 @@ final class SkillLibraryModel {
     }
 
     func report(_ error: any Error, title: String) {
+        guard (error is CancellationError) == false else {
+            return
+        }
         presentedError = PresentedError(
             title: title,
             message: error.localizedDescription

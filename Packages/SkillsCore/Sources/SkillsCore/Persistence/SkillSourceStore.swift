@@ -97,7 +97,15 @@ public actor JSONSkillSourceStore: SkillSourceStore {
     }
 
     public func save(_ sources: [SkillSource]) throws {
-        let configuration = (try? loadConfigurationFromDisk()) ?? SkillSourceConfiguration()
+        let configuration: SkillSourceConfiguration
+        do {
+            configuration = try loadConfigurationFromDisk()
+        } catch is DecodingError {
+            configuration = SkillSourceConfiguration()
+        } catch {
+            throw error
+        }
+
         try saveConfigurationToDisk(
             SkillSourceConfiguration(
                 sources: sources,

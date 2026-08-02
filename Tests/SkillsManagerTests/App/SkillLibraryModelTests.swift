@@ -1374,6 +1374,34 @@ struct SkillLibraryModelTests {
         #expect(model.mutatingSkillIDs.isEmpty)
     }
 
+    @Test("A cancelled task in withSerializedSourceMutation throws CancellationError and does not run mutation")
+    func cancelledSourceMutationThrows() async throws {
+        let model = SkillLibraryModel()
+        let task = Task { @MainActor in
+            try await model.addSource(at: URL(filePath: "/skills/cancelled"))
+        }
+        task.cancel()
+
+        await #expect(throws: CancellationError.self) {
+            try await task.value
+        }
+        #expect(model.sources.isEmpty)
+    }
+
+    @Test("Reporting a CancellationError does not present an alert")
+    func reportSuppressesCancellationError() {
+        let model = SkillLibraryModel()
+        model.report(CancellationError(), title: "Unable to Add Directory")
+        #expect(model.presentedError == nil)
+
+        struct TestError: LocalizedError {
+            var errorDescription: String? { "Real error" }
+        }
+        model.report(TestError(), title: "Unable to Add Directory")
+        #expect(model.presentedError?.title == "Unable to Add Directory")
+        #expect(model.presentedError?.message == "Real error")
+    }
+
     private func makeLifecycleSkill(
         named name: String,
         identifier: String,
