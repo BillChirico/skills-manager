@@ -269,7 +269,7 @@ actionlint .github/workflows/ci.yml
 git diff --check origin/main...HEAD
 ```
 
-- [ ] **Step 2: Audit the final range**
+- [x] **Step 2: Audit the final range**
 
 ```bash
 git status --short
