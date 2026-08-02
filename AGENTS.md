@@ -59,6 +59,13 @@ hand-off when full Xcode is available. If Xcode is unavailable, run
 - Suggest a standard agent location only while it exists on disk, and add it
   directly instead of reopening a picker the user already answered. Keep one
   generic picker action for every other folder rather than a per-agent list.
+- Detect and configure every supported agent's standard directory that exists
+  under the account home once per launch, in
+  `SkillLibraryModel.restoreSources()`. Persist a folder the user removes as a
+  durable exclusion so it does not reappear on the next launch, and clear that
+  exclusion only when the same standard path is added back. Inject the account
+  home and a directory-existence closure so tests never touch a developer's
+  real home directory.
 - Resolve the account home through `UserHomeDirectory`, never
   `FileManager.homeDirectoryForCurrentUser`, so suggestions, display paths, and
   CLI operations use one authoritative location. If account-home resolution
@@ -110,7 +117,10 @@ bounded diagnostic.
 When a source mutation rolls back after a failed save, re-resolve the target by
 `SkillSource.ID` inside the `catch`. An index captured before the `await` can be
 stale, because awaiting the save yields the main actor and lets another mutation
-reorder or shrink `sources`. Never widen the permissions of the store file.
+reorder or shrink `sources`. The same rule applies to automatic-folder
+exclusions: snapshot `excludedAutomaticDirectoryURLs` before the mutation and
+restore that snapshot in the `catch`, never recompute it from the failed
+in-memory state. Never widen the permissions of the store file.
 
 When the account home is available, the abbreviated `~/…` display path keeps the
 account name off screen. Do not pass a raw absolute path to a tooltip, label, or
