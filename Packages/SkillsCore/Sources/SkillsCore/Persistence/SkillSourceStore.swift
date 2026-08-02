@@ -72,10 +72,29 @@ public actor JSONSkillSourceStore: SkillSourceStore {
     }
 
     public func loadSources() throws -> [SkillSource] {
-        try loadConfiguration().sources
+        try loadConfigurationFromDisk().sources
     }
 
-    public func loadConfiguration() throws -> SkillSourceConfiguration {
+    public func loadConfiguration() async throws -> SkillSourceConfiguration {
+        try loadConfigurationFromDisk()
+    }
+
+    public func save(_ sources: [SkillSource]) throws {
+        let configuration = try loadConfigurationFromDisk()
+        try saveConfigurationToDisk(
+            SkillSourceConfiguration(
+                sources: sources,
+                excludedAutomaticDirectoryURLs:
+                    configuration.excludedAutomaticDirectoryURLs
+            )
+        )
+    }
+
+    public func save(_ configuration: SkillSourceConfiguration) async throws {
+        try saveConfigurationToDisk(configuration)
+    }
+
+    private func loadConfigurationFromDisk() throws -> SkillSourceConfiguration {
         let fileManager = FileManager()
         guard fileManager.fileExists(atPath: fileURL.path) else {
             return SkillSourceConfiguration()
@@ -96,18 +115,9 @@ public actor JSONSkillSourceStore: SkillSourceStore {
         )
     }
 
-    public func save(_ sources: [SkillSource]) throws {
-        let configuration = try loadConfiguration()
-        try save(
-            SkillSourceConfiguration(
-                sources: sources,
-                excludedAutomaticDirectoryURLs:
-                    configuration.excludedAutomaticDirectoryURLs
-            )
-        )
-    }
-
-    public func save(_ configuration: SkillSourceConfiguration) throws {
+    private func saveConfigurationToDisk(
+        _ configuration: SkillSourceConfiguration
+    ) throws {
         let fileManager = FileManager()
         try fileManager.createDirectory(
             at: fileURL.deletingLastPathComponent(),
