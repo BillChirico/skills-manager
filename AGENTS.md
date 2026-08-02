@@ -56,6 +56,14 @@ hand-off when full Xcode is available. If Xcode is unavailable, run
 - Keep folder addition and the primary add/remove list in Settings. Route other
   entry points to the Settings scene instead of duplicating the folder picker;
   contextual relocation for unavailable sources may remain in the library.
+- Suggest a standard agent location only while it exists on disk, and add it
+  directly instead of reopening a picker the user already answered. Keep one
+  generic picker action for every other folder rather than a per-agent list.
+- Resolve the account home through `UserHomeDirectory`, never
+  `FileManager.homeDirectoryForCurrentUser`, which reports the sandbox container
+  instead of the user's folders. If account-home resolution fails, suppress
+  home-based suggestions, picker defaults, and `~` abbreviation rather than
+  substituting another directory.
 - Keep Settings folder selection explicit: preserve a valid user selection,
   clear a stale one, and never auto-select the first row.
 - Present paused, scanning, and unavailable folder states with text rather than
@@ -90,9 +98,15 @@ contents, tokens, credentials, or user-specific absolute paths.
 
 For directory add and relocation flows, start the selected URL’s security scope
 before creating its bookmark. Keep the scope active while the source is
-configured, and balance it on every bookmark or persistence failure. Suggested
-agent locations may initialize the system picker, but must never bypass explicit
-user approval.
+configured, and balance it on every bookmark or persistence failure.
+
+Suggested agent locations add their folder straight through
+`SkillLibraryModel.addSource(at:agent:)`. That succeeds only where the process
+already holds access, so a sandboxed build falls back to the system picker
+rooted at the suggestion when the model reports `SourceAccessError.accessDenied`.
+Keep that fallback narrow: report every other failure instead of swallowing it,
+and never widen the sandbox, add a temporary-exception entitlement, or weaken
+`SecurityScopedSkillSourceAccess` to make a suggestion succeed.
 
 When a source mutation rolls back after a failed save, re-resolve the target by
 `SkillSource.ID` inside the `catch`. An index captured before the `await` can be
@@ -100,9 +114,12 @@ stale, because awaiting the save yields the main actor and lets another mutation
 reorder or shrink `sources`. Persist bookmark data owner-only; never widen the
 permissions of the store file.
 
-The abbreviated `~/…` display path exists so the account name stays off screen.
-Do not pass a raw absolute path to a tooltip, label, or accessibility string that
-renders next to it.
+When the account home is available, the abbreviated `~/…` display path keeps the
+account name off screen. Do not pass a raw absolute path to a tooltip, label, or
+accessibility string that renders next to an available abbreviation.
+`UserHomeDirectory` reads the account home from the password database, which
+yields a path and never access to the files beneath it. If that lookup fails,
+leave persisted paths un-abbreviated instead of guessing at the account home.
 
 ## Change checklist
 

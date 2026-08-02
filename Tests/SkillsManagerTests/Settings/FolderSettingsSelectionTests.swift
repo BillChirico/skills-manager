@@ -116,6 +116,23 @@ struct FolderSettingsRowPresentationTests {
         #expect(presentation.stateAccessibilityLabel == "Paused")
     }
 
+    @Test("A row leaves its path unabridged when the account home is unavailable")
+    func unavailableHomeSuppressesAbbreviation() {
+        let source = makeSource(
+            name: "Claude",
+            path: "/Users/reviewer/.claude/skills/",
+            isEnabled: true
+        )
+
+        let presentation = FolderSettingsRowPresentation(
+            source: source,
+            state: .available,
+            homeDirectory: nil
+        )
+
+        #expect(presentation.displayPath == "/Users/reviewer/.claude/skills")
+    }
+
     @Test("An unavailable row exposes a named reconnect action")
     func unavailableStateExposesReconnect() {
         let source = makeSource(

@@ -31,11 +31,16 @@ those APIs are macOS-specific. The model receives persistence and discovery
 dependencies through protocols rather than reaching for global state. A
 separate catalog model coordinates debounced skills.sh searches and
 installations so network and filesystem work remain independently testable.
-Agent models expose their standard user skill-directory paths, which the app
-uses as picker starting points without bypassing the sandbox’s user-consent
-boundary. `SettingsView` owns folder-add, folder-remove, enabled-state, and
-reconnect presentation, including the agent-aware picker menu, explicit list
-selection, and destructive confirmation. Selection reconciliation preserves a
+Agent models expose their standard user skill-directory paths.
+`AgentDirectorySuggestion` resolves those paths against the account home and
+keeps only the folders that exist, so the add menu never offers a location the
+user has not created. If account-home resolution fails, it returns no
+suggestions rather than resolving them against the sandbox container.
+`SettingsView` owns folder-add, folder-remove,
+enabled-state, and reconnect presentation, including the suggestion menu,
+explicit list selection, and destructive confirmation. A suggestion adds its
+folder directly through the library model; the picker stays behind one generic
+`Add Folder…` action and behind the sandbox fallback described below. Selection reconciliation preserves a
 valid user selection but never chooses a folder on the user's behalf. The
 library routes its empty states to the Settings scene; contextual relocation
 also remains in the library for unavailable sources. All mutations still pass
@@ -46,7 +51,10 @@ through `SkillLibraryModel`.
 `Packages/SkillsCore` owns:
 
 - `SkillSource`, a user-configured skill directory;
-- `SkillAgent`, the agent associated with a configured directory;
+- `SkillAgent`, the agent associated with a configured directory, including
+  `global` for the cross-agent `~/.agents/skills` convention that `codex` also
+  reads — the two cases deliberately resolve to one folder, and `addSource`
+  de-duplicates by URL so configuring both selects the same source;
 - `AgentSkill`, a discovered skill with stable source-relative identity;
 - `SkillDiscovering`, with a local `SKILL.md` scanner;
 - `SkillSourceStore`, with an atomic JSON implementation;
@@ -103,9 +111,19 @@ button into a selectable list row, unavailable rows also expose Reconnect as a
 source-specific named accessibility action on the row Toggle.
 
 The app sandbox permits outbound network access, user-selected read/write
-access, and app-scoped bookmarks. Directory grants are stored as
-security-scoped bookmarks, resolved on launch, and held only while their source
-remains configured. Failed resolution is surfaced as an unavailable source
+access, and app-scoped bookmarks. A sandboxed process therefore cannot read an
+arbitrary folder under the account home until the user confirms it, so adding a
+suggested location succeeds only where access already exists. `SettingsView`
+treats `SourceAccessError.accessDenied` from that path as "consent still
+required" and opens the picker at the suggestion instead of reporting an error;
+every other failure is reported. `UserHomeDirectory` supplies the account home
+that suggestions and `~` abbreviation resolve against, because
+`FileManager.homeDirectoryForCurrentUser` reports the sandbox container. The
+password-database lookup is fallible; when it fails, home-based suggestions and
+picker defaults disappear and persisted source paths remain un-abbreviated.
+
+Directory grants are stored as security-scoped bookmarks, resolved on launch,
+and held only while their source remains configured. Failed resolution is surfaced as an unavailable source
 instead of an empty library. A URL returned by the directory picker must be
 opened with `startAccessingSecurityScopedResource()` before bookmark creation;
 add and relocation operations release that access and roll back state if
