@@ -6,9 +6,39 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(cd "$script_dir/.." && pwd -P)"
 dmg_path="${1:-$repo_root/build/release/SkillsManager-unsigned.dmg}"
 
+# Verification is restricted to repository-local images, matching the build
+# script and preventing an overridable path from mounting external files.
+case "$dmg_path" in
+  */../*|*/..|../*)
+    echo "error: DMG path must remain inside the repository: $dmg_path" >&2
+    exit 1
+    ;;
+esac
 case "$dmg_path" in
   /*) ;;
   *) dmg_path="$repo_root/$dmg_path" ;;
+esac
+
+dmg_parent="$(dirname "$dmg_path")"
+case "$dmg_parent/" in
+  "$repo_root/"|"$repo_root"/*) ;;
+  *)
+    echo "error: DMG path must remain inside the repository: $dmg_path" >&2
+    exit 1
+    ;;
+esac
+if [[ ! -d "$dmg_parent" ]]; then
+  echo "error: DMG parent directory does not exist: $dmg_parent" >&2
+  exit 1
+fi
+dmg_parent="$(cd "$dmg_parent" && pwd -P)"
+dmg_path="$dmg_parent/$(basename "$dmg_path")"
+case "$dmg_path" in
+  "$repo_root"/*) ;;
+  *)
+    echo "error: DMG path must remain inside the repository: $dmg_path" >&2
+    exit 1
+    ;;
 esac
 
 if [[ ! -f "$dmg_path" ]]; then

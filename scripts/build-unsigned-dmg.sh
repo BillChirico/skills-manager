@@ -6,9 +6,36 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(cd "$script_dir/.." && pwd -P)"
 output_path="${1:-$repo_root/build/release/SkillsManager-unsigned.dmg}"
 
+# DMG artifacts must remain inside the repository. Reject traversal before
+# resolving the parent so an overridable output cannot create external paths.
+case "$output_path" in
+  */../*|*/..|../*)
+    echo "error: DMG output path must remain inside the repository: $output_path" >&2
+    exit 1
+    ;;
+esac
 case "$output_path" in
   /*) ;;
   *) output_path="$repo_root/$output_path" ;;
+esac
+
+output_parent="$(dirname "$output_path")"
+case "$output_parent/" in
+  "$repo_root/"|"$repo_root"/*) ;;
+  *)
+    echo "error: DMG output path must remain inside the repository: $output_path" >&2
+    exit 1
+    ;;
+esac
+mkdir -p "$output_parent"
+output_parent="$(cd "$output_parent" && pwd -P)"
+output_path="$output_parent/$(basename "$output_path")"
+case "$output_path" in
+  "$repo_root"/*) ;;
+  *)
+    echo "error: DMG output path must remain inside the repository: $output_path" >&2
+    exit 1
+    ;;
 esac
 
 case "$output_path" in

@@ -9,7 +9,7 @@ test_root="$(mktemp -d "${TMPDIR:-/tmp}/skills-manager-packaging-test.XXXXXX")"
 cleanup() {
   status=$?
   trap - EXIT INT TERM
-  rm -rf -- "$test_root"
+  rm -rf -- "$test_root" "$repo_root/build/packaging-test"
   exit "$status"
 }
 trap cleanup EXIT INT TERM
@@ -17,8 +17,24 @@ trap cleanup EXIT INT TERM
 fake_bin="$test_root/bin"
 fake_log="$test_root/log"
 fake_tmp="$test_root/tmp"
-dmg_path="$test_root/output/SkillsManager-unsigned.dmg"
-mkdir -p "$fake_bin" "$fake_log" "$fake_tmp"
+dmg_path="$repo_root/build/packaging-test/SkillsManager-unsigned.dmg"
+mkdir -p "$fake_bin" "$fake_log" "$fake_tmp" "$repo_root/build/packaging-test"
+
+if bash "$repo_root/scripts/build-unsigned-dmg.sh" '../x.dmg' \
+  > "$fake_log/traversal.stdout" \
+  2> "$fake_log/traversal.stderr"; then
+  echo 'build script accepted a DMG path outside the repository' >&2
+  exit 1
+fi
+grep -F -- 'must remain inside the repository' "$fake_log/traversal.stderr" > /dev/null
+
+if bash "$repo_root/scripts/verify-unsigned-dmg.sh" '../x.dmg' \
+  > "$fake_log/verify-traversal.stdout" \
+  2> "$fake_log/verify-traversal.stderr"; then
+  echo 'verify script accepted a DMG path outside the repository' >&2
+  exit 1
+fi
+grep -F -- 'must remain inside the repository' "$fake_log/verify-traversal.stderr" > /dev/null
 
 cat > "$fake_bin/xcodebuild" <<'FAKE_XCODEBUILD'
 #!/usr/bin/env bash
