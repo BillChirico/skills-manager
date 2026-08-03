@@ -1075,11 +1075,13 @@ struct SkillLibraryModelTests {
         )
         let removedSkill = AgentSkill(
             name: "Alpha Skill",
+            summary: "Alpha summary.",
             directoryURL: removedSource.directoryURL.appending(path: "alpha"),
             sourceID: removedSource.id
         )
         let otherSkill = AgentSkill(
             name: "Beta Skill",
+            summary: "Beta summary.",
             directoryURL: otherSource.directoryURL.appending(path: "beta"),
             sourceID: otherSource.id
         )
@@ -1132,6 +1134,7 @@ struct SkillLibraryModelTests {
         )
         let removedSkill = AgentSkill(
             name: "Alpha Skill",
+            summary: "Alpha summary.",
             directoryURL: removedSource.directoryURL.appending(path: "alpha"),
             sourceID: removedSource.id
         )
