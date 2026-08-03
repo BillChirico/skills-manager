@@ -1,8 +1,9 @@
 PROJECT := SkillsManager.xcodeproj
 SCHEME := SkillsManager
 DESTINATION := platform=macOS
+DMG_OUTPUT ?= build/release/SkillsManager-unsigned.dmg
 
-.PHONY: generate lint test build app-test check
+.PHONY: generate lint test build app-test packaging-test dmg verify-dmg check
 
 generate:
 	@command -v xcodegen >/dev/null || (echo "error: install XcodeGen with 'brew install xcodegen'" && exit 1)
@@ -38,6 +39,15 @@ app-test:
 		CODE_SIGNING_ALLOWED=NO \
 		test
 
-check: generate lint test
+packaging-test:
+	bash Tests/PackagingTests/unsigned-dmg.test.sh
+
+dmg:
+	bash scripts/build-unsigned-dmg.sh "$(DMG_OUTPUT)"
+
+verify-dmg:
+	bash scripts/verify-unsigned-dmg.sh "$(DMG_OUTPUT)"
+
+check: generate lint test packaging-test
 	git diff --exit-code -- $(PROJECT)
 	$(MAKE) app-test

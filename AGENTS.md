@@ -30,12 +30,16 @@ make generate   # regenerate the Xcode project after project.yml changes
 make lint       # check Swift formatting without modifying files
 make test       # run SkillsCore tests with Swift Package Manager
 make build      # build the macOS app without code signing
+make packaging-test # exercise DMG orchestration with controlled tool fakes
+make dmg        # build an unsigned Release DMG (macOS and Xcode required)
+make verify-dmg # verify and mount-check that DMG (macOS required)
 make check      # regenerate, test, verify generated files, and build
 ```
 
 Run the narrowest relevant command while iterating and `make check` before
 hand-off when full Xcode is available. If Xcode is unavailable, run
-`make generate` and `make test`, then state that limitation clearly.
+`make generate`, `make test`, and `make packaging-test` when their toolchains
+are available, then state the unavailable commands clearly.
 
 ## Swift conventions
 
@@ -107,6 +111,29 @@ Do not hand-edit `SkillsManager.xcodeproj/project.pbxproj`. Update `project.yml`
 run `make generate`, and commit both the specification and generated project.
 Do not add third-party dependencies without documenting the reason in the pull
 request and `docs/ARCHITECTURE.md` when the choice affects architecture.
+
+## Distribution
+
+The current CI distribution is intentionally unsigned and unnotarized. A
+successful push to `main` may build, validate, and upload only
+`build/release/SkillsManager-unsigned.dmg`; pull requests run the portable
+packaging test but must not publish a DMG. Keep the artifact name's `unsigned`
+marker and document that Gatekeeper can warn about or block it. Never describe
+this artifact as a trusted public release, recommend disabling Gatekeeper, or
+remove quarantine metadata on the user's behalf.
+
+Keep archive, image creation, and mounted-image validation in the focused
+scripts under `scripts/`, exposed through the Make targets above. The build must
+use `CODE_SIGNING_ALLOWED=NO`; validation must require the app executable,
+`Info.plist`, absence of `Contents/_CodeSignature`, and an `Applications`
+symlink targeting `/Applications` before upload.
+
+GitHub Actions must retain least privilege (`contents: read`), check out without
+persisted credentials, and pin every action to a full commit SHA. Do not add
+Developer ID certificates, App Store Connect credentials, signing, or
+notarization to this path. Those changes require a separate design, security
+review, and synchronized updates to `README.md`, this file, `CLAUDE.md`,
+`docs/ARCHITECTURE.md`, and `docs/SECURITY.md`.
 
 ## Security
 
@@ -231,4 +258,6 @@ buffered the response.
 3. Add or update focused tests for behavior.
 4. Regenerate the Xcode project when its inputs change.
 5. Run all checks available in the current environment.
-6. Update documentation when commands, requirements, or architecture change.
+6. Run the portable packaging test when distribution scripts or CI change, and
+   run the real DMG build and verifier on macOS when available.
+7. Update documentation when commands, requirements, or architecture change.

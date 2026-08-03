@@ -83,6 +83,38 @@ full Xcode app. `make build` and the app unit tests require Xcode. Swift sources
 are formatted with the `swift format` command included in the Swift toolchain;
 run `make lint` for a non-mutating style check.
 
+## Unsigned DMG artifacts
+
+Every successful push to `main` builds and uploads
+`SkillsManager-unsigned.dmg` from the GitHub Actions run. The artifact remains
+available for 30 days and is uploaded as the DMG itself rather than inside a
+second archive. Open it and drag `Skills Manager.app` onto the included
+`Applications` shortcut to install the app.
+
+> [!WARNING]
+> This CI artifact is neither Developer ID signed nor notarized. macOS
+> Gatekeeper can warn about or block it, and the workflow is not the final
+> trusted public release channel. The workflow contains no Apple signing
+> credentials. Review the source and make an explicit macOS security decision
+> before running the app; do not disable Gatekeeper.
+
+Download the DMG from the **Artifacts** area of a successful `main` branch CI
+run. Contributors can exercise the packaging orchestration anywhere Bash and
+Make are available and can build and mount-check the real image on macOS with
+Xcode 26:
+
+```sh
+make packaging-test
+make dmg
+make verify-dmg
+```
+
+`make dmg` creates `build/release/SkillsManager-unsigned.dmg` from an unsigned
+Release archive. `make verify-dmg` verifies the image, mounts it read-only,
+checks the app and drag-to-Applications layout, and detaches it. Developer ID
+signing and Apple notarization are intentionally deferred to a separately
+reviewed release workflow change.
+
 ## Catalog browsing and installation
 
 The Discover Skills window opens on the skills.sh all-time download leaderboard,

@@ -11,6 +11,12 @@ At a glance:
 - `Packages/SkillsCore/` is the UI-independent domain package.
 - `make test` runs package tests.
 - `make check` is the preferred pre-handoff validation when Xcode is installed.
+- `make packaging-test` exercises DMG orchestration; `make dmg` and
+  `make verify-dmg` build and mount-check the real image on macOS.
+- Successful `main` pushes publish `SkillsManager-unsigned.dmg` for 30 days.
+  It is neither Developer ID signed nor notarized, so Gatekeeper can block it;
+  keep the workflow secret-free, least-privileged, and pinned to full action
+  SHAs until a separately reviewed signing design replaces this boundary.
 - Node.js 22.20 or newer and `npx` are runtime requirements for lifecycle actions.
 - Remote content is untrusted; preserve the validated shell-free CLI boundary,
   pinned package, absolute delimiter-safe executable search paths, scrubbed child
