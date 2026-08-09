@@ -638,7 +638,7 @@ public actor SkillsCLIManager: SkillManaging {
     private let initializationError: SkillsCLIError?
 
     private var operationIsRunning = false
-    private var operationWaiters: [CheckedContinuation<Void, Never>] = []
+    private var operationWaiters: [(id: UUID, continuation: CheckedContinuation<Void, Error>)] = []
 
     /// Creates a lifecycle manager using the resolved account home and current environment.
     public init(
@@ -670,7 +670,7 @@ public actor SkillsCLIManager: SkillManaging {
     }
 
     public func checkForUpdates() async throws -> SkillUpdateAvailability {
-        await beginOperation()
+        try await beginOperation()
         defer { finishOperation() }
 
         if let initializationError {
@@ -778,7 +778,7 @@ public actor SkillsCLIManager: SkillManaging {
     }
 
     public func install(_ skill: CatalogSkill, into source: SkillSource) async throws -> URL {
-        await beginOperation()
+        try await beginOperation()
         defer { finishOperation() }
 
         let target = try cliTarget(for: source)
@@ -856,7 +856,7 @@ public actor SkillsCLIManager: SkillManaging {
     }
 
     public func update(_ skill: AgentSkill, in source: SkillSource) async throws {
-        await beginOperation()
+        try await beginOperation()
         defer { finishOperation() }
 
         _ = try cliTarget(for: source)
@@ -870,7 +870,7 @@ public actor SkillsCLIManager: SkillManaging {
     }
 
     public func remove(_ skill: AgentSkill, from source: SkillSource) async throws {
-        await beginOperation()
+        try await beginOperation()
         defer { finishOperation() }
 
         let target = try cliTarget(for: source)
@@ -895,15 +895,33 @@ public actor SkillsCLIManager: SkillManaging {
         }
     }
 
-    private func beginOperation() async {
+    private func beginOperation() async throws {
         guard operationIsRunning else {
+            try Task.checkCancellation()
             operationIsRunning = true
             return
         }
 
-        await withCheckedContinuation { continuation in
-            operationWaiters.append(continuation)
+        let waiterID = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                } else {
+                    operationWaiters.append((waiterID, continuation))
+                }
+            }
+        } onCancel: {
+            Task { await self.cancelOperationWaiter(waiterID) }
         }
+    }
+
+    private func cancelOperationWaiter(_ waiterID: UUID) {
+        guard let index = operationWaiters.firstIndex(where: { $0.id == waiterID }) else {
+            return
+        }
+        let waiter = operationWaiters.remove(at: index)
+        waiter.continuation.resume(throwing: CancellationError())
     }
 
     private func finishOperation() {
@@ -912,7 +930,7 @@ public actor SkillsCLIManager: SkillManaging {
             return
         }
 
-        operationWaiters.removeFirst().resume()
+        operationWaiters.removeFirst().continuation.resume()
     }
 
     private func cliTarget(for source: SkillSource) throws -> CLITarget {
