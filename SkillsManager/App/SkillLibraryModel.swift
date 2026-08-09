@@ -770,6 +770,12 @@ final class SkillLibraryModel {
             skills.removeAll { $0.sourceID == sourceID }
             selectedSkillIDs.subtract(removedSkillIDs)
             sourceStates[sourceID] = nil
+            if let lastUpdateAvailability {
+                applyUpdateAvailability(
+                    lastUpdateAvailability,
+                    updatesCheckState: updateCheckState != .checking
+                )
+            }
 
             if didChangeSidebar {
                 sidebarSelection = .allSkills
@@ -792,6 +798,12 @@ final class SkillLibraryModel {
                 skills.removeAll { removedSkillIDs.contains($0.id) }
                 skills.append(contentsOf: removedSkills)
                 skills = Self.sortedSkills(skills)
+                if let lastUpdateAvailability {
+                    applyUpdateAvailability(
+                        lastUpdateAvailability,
+                        updatesCheckState: updateCheckState != .checking
+                    )
+                }
                 sourceStates[sourceID] = Self.rollbackSourceState(
                     previousSourceState
                 )
