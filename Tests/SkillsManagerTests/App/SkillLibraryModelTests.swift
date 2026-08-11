@@ -1205,7 +1205,7 @@ struct SkillLibraryModelTests {
         #expect(model.selectedSkillIDs == [existingSkill.id])
     }
 
-    @Test("Denied directory recovery leaves the source and its skills unchanged")
+    @Test("Denied directory recovery preserves source and skill content")
     func deniedSourceRecoveryIsNonDestructive() async throws {
         let source = SkillSource(
             name: "Team Skills",
@@ -1242,8 +1242,10 @@ struct SkillLibraryModelTests {
             )
         }
 
+        var expectedSkill = existingSkill
+        expectedSkill.updateStatus = .unknown
         #expect(model.sources == [source])
-        #expect(model.skills == [existingSkill])
+        #expect(model.skills == [expectedSkill])
         #expect(await store.loadSources() == [source])
         #expect(model.sourceState(for: source.id) == .unavailable)
         #expect(sourceAccess.activeURL(for: source.id) == nil)
