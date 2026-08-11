@@ -221,10 +221,9 @@ failed selections visible. Busy state prevents the same skill from receiving
 overlapping mutations.
 
 The launch-time availability check can access the network because the pinned
-probe may fetch repositories inside its disposable home. The app currently has
-no consent prompt or preference to disable that automatic check. Security review
-finding 2 records this as a residual Low risk pending a product decision; the
-current release does not implement that preference.
+probe may fetch repositories inside its disposable home. Consent behavior for
+the automatic network-capable check remains an unresolved product decision.
+Security review finding 2 records this as a residual Low risk.
 
 ### The install command
 

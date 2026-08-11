@@ -1011,6 +1011,25 @@ struct SkillsCLIManagerTests {
         #expect(await runner.commands.isEmpty)
     }
 
+    @Test("A lock entry without skillPath never launches the CLI")
+    func updateAvailabilityRejectsMissingSkillPath() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+        var entry = makeLockEntry(name: "swift-testing-pro")
+        entry.removeValue(forKey: "skillPath")
+        try writeSkillLock(
+            in: homeDirectory,
+            skills: ["swift-testing-pro": entry]
+        )
+        let runner = UpdateCheckCommandRunner(output: "")
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        await #expect(throws: SkillsCLIError.updateCheckLockInvalid) {
+            try await manager.checkForUpdates()
+        }
+        #expect(await runner.commands.isEmpty)
+    }
+
     @Test("Entries grouped under one source must agree on remote metadata")
     func updateAvailabilityRejectsInconsistentSourceGroup() async throws {
         let homeDirectory = try makeTemporaryDirectory()
@@ -1350,6 +1369,42 @@ struct SkillsCLIManagerTests {
         _ = try await secondInstall.value
 
         #expect(await runner.commands.count == 2)
+    }
+
+    @Test(
+        "A queued update check observes cancellation before the active command finishes"
+    )
+    func queuedUpdateCheckIsCancellationAware() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+        try writeSkillLock(
+            in: homeDirectory,
+            skills: ["swift-testing-pro": makeLockEntry(name: "swift-testing-pro")]
+        )
+        let source = try makeSource(agent: .claudeCode, homeDirectory: homeDirectory)
+        let runner = SuspendingCommandRunner(sourceDirectory: source.directoryURL)
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        let install = Task {
+            try await manager.install(makeCatalogSkill(slug: "first-skill"), into: source)
+        }
+        await runner.waitUntilFirstCommandStarted()
+
+        let updateCheck = Task {
+            try await manager.checkForUpdates()
+        }
+        for _ in 0..<10 {
+            await Task.yield()
+        }
+        updateCheck.cancel()
+
+        await #expect(throws: CancellationError.self) {
+            try await updateCheck.value
+        }
+        #expect(await runner.commands.count == 1)
+
+        await runner.resumeFirstCommand()
+        _ = try await install.value
     }
 
     @Test("A failed command releases the lifecycle operation gate")

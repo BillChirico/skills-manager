@@ -38,7 +38,7 @@ public protocol SkillManaging: Sendable {
 public extension SkillManaging {
     /// Test and alternate managers that do not provide remote update discovery opt out safely.
     func checkForUpdates() async throws -> SkillUpdateAvailability {
-        throw SkillsCLIError.updateCheckLockInvalid
+        throw SkillsCLIError.updateCheckLockMissing
     }
 }
 
@@ -128,6 +128,7 @@ struct FoundationProcessCommandRunner: ProcessCommandRunning {
                                 return .stopped
                             }
                             captureTask.cancel()
+                            _ = await captureTask.result
                             return .stopped
                         }
 
@@ -180,6 +181,8 @@ private final class BoundedProcessOutputCapture: @unchecked Sendable {
     init(maximumBytes: Int) {
         self.maximumBytes = maximumBytes
     }
+
+    deinit {}
 
     /// Owns the pipe's read end for its complete lifetime. Callers cancel this
     /// task and await it; no other task may close or reuse the descriptor.
@@ -503,7 +506,7 @@ public enum SkillsCLIError: Error, Equatable, LocalizedError, Sendable {
         case .updateCheckLockInvalid:
             "Skills Manager could not safely read the global skills lock file, so update availability is unavailable."
         case .updateCheckOutputInvalid:
-            "The skills CLI did not return a complete, recognized update result. No updates were reported."
+            "The skills CLI did not return a complete, recognized update result, so update availability is unknown."
         case .commandCouldNotLaunch:
             "Skills Manager could not launch npx. Verify that Node.js 22.20 or newer is installed."
         case .commandFailed(let exitCode):
@@ -638,7 +641,12 @@ public actor SkillsCLIManager: SkillManaging {
     private let initializationError: SkillsCLIError?
 
     private var operationIsRunning = false
-    private var operationWaiters: [CheckedContinuation<Void, Never>] = []
+    private struct OperationWaiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Void, any Error>
+    }
+
+    private var operationWaiters: [OperationWaiter] = []
 
     /// Creates a lifecycle manager using the resolved account home and current environment.
     public init(
@@ -670,7 +678,7 @@ public actor SkillsCLIManager: SkillManaging {
     }
 
     public func checkForUpdates() async throws -> SkillUpdateAvailability {
-        await beginOperation()
+        try await beginOperation()
         defer { finishOperation() }
 
         if let initializationError {
@@ -778,7 +786,7 @@ public actor SkillsCLIManager: SkillManaging {
     }
 
     public func install(_ skill: CatalogSkill, into source: SkillSource) async throws -> URL {
-        await beginOperation()
+        try await beginOperation()
         defer { finishOperation() }
 
         let target = try cliTarget(for: source)
@@ -856,7 +864,7 @@ public actor SkillsCLIManager: SkillManaging {
     }
 
     public func update(_ skill: AgentSkill, in source: SkillSource) async throws {
-        await beginOperation()
+        try await beginOperation()
         defer { finishOperation() }
 
         _ = try cliTarget(for: source)
@@ -870,7 +878,7 @@ public actor SkillsCLIManager: SkillManaging {
     }
 
     public func remove(_ skill: AgentSkill, from source: SkillSource) async throws {
-        await beginOperation()
+        try await beginOperation()
         defer { finishOperation() }
 
         let target = try cliTarget(for: source)
@@ -895,15 +903,38 @@ public actor SkillsCLIManager: SkillManaging {
         }
     }
 
-    private func beginOperation() async {
+    private func beginOperation() async throws {
+        try Task.checkCancellation()
         guard operationIsRunning else {
             operationIsRunning = true
             return
         }
 
-        await withCheckedContinuation { continuation in
-            operationWaiters.append(continuation)
+        let waiterID = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                } else {
+                    operationWaiters.append(
+                        OperationWaiter(id: waiterID, continuation: continuation)
+                    )
+                }
+            }
+        } onCancel: {
+            Task { await self.cancelOperationWaiter(waiterID) }
         }
+    }
+
+    private func cancelOperationWaiter(_ waiterID: UUID) {
+        guard
+            let index = operationWaiters.firstIndex(where: { $0.id == waiterID })
+        else {
+            return
+        }
+        operationWaiters.remove(at: index).continuation.resume(
+            throwing: CancellationError()
+        )
     }
 
     private func finishOperation() {
@@ -912,7 +943,7 @@ public actor SkillsCLIManager: SkillManaging {
             return
         }
 
-        operationWaiters.removeFirst().resume()
+        operationWaiters.removeFirst().continuation.resume()
     }
 
     private func cliTarget(for source: SkillSource) throws -> CLITarget {
@@ -1097,13 +1128,11 @@ public actor SkillsCLIManager: SkillManaging {
             throw SkillsCLIError.updateCheckLockInvalid
         }
 
-        let lockPath = lockURL.path(percentEncoded: false)
         guard
-            let attributes = try? FileManager.default.attributesOfItem(atPath: lockPath),
-            let size = attributes[.size] as? NSNumber,
-            size.intValue <= Self.maximumUpdateLockBytes,
-            let data = try? Data(contentsOf: lockURL, options: [.mappedIfSafe]),
-            data.count <= Self.maximumUpdateLockBytes,
+            let data = try? Self.readBoundedRegularFile(
+                at: lockURL,
+                maximumBytes: Self.maximumUpdateLockBytes
+            ),
             let lock = try? JSONDecoder().decode(UpdateLockFile.self, from: data),
             lock.version == 3,
             lock.skills.count <= 10_000
@@ -1143,6 +1172,69 @@ public actor SkillsCLIManager: SkillManaging {
         }
 
         return lock
+    }
+
+    private static func readBoundedRegularFile(
+        at url: URL,
+        maximumBytes: Int
+    ) throws -> Data {
+        let path = url.path(percentEncoded: false)
+        let descriptor = path.withCString { pathPointer in
+            #if canImport(Darwin)
+                Darwin.open(pathPointer, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+            #elseif canImport(Glibc)
+                Glibc.open(pathPointer, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+            #else
+                -1
+            #endif
+        }
+        guard descriptor >= 0 else {
+            throw SkillsCLIError.updateCheckLockInvalid
+        }
+        defer {
+            #if canImport(Darwin)
+                _ = Darwin.close(descriptor)
+            #elseif canImport(Glibc)
+                _ = Glibc.close(descriptor)
+            #endif
+        }
+
+        var status = stat()
+        guard
+            fstat(descriptor, &status) == 0,
+            status.st_mode & S_IFMT == S_IFREG,
+            status.st_size >= 0,
+            status.st_size <= off_t(maximumBytes)
+        else {
+            throw SkillsCLIError.updateCheckLockInvalid
+        }
+
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: min(8_192, maximumBytes + 1))
+        while true {
+            let bytesRead = buffer.withUnsafeMutableBytes { rawBuffer in
+                #if canImport(Darwin)
+                    Darwin.read(descriptor, rawBuffer.baseAddress, rawBuffer.count)
+                #elseif canImport(Glibc)
+                    Glibc.read(descriptor, rawBuffer.baseAddress, rawBuffer.count)
+                #else
+                    -1
+                #endif
+            }
+            if bytesRead == 0 {
+                return data
+            }
+            if bytesRead < 0 {
+                if errno == EINTR {
+                    continue
+                }
+                throw SkillsCLIError.updateCheckLockInvalid
+            }
+            guard data.count <= maximumBytes - bytesRead else {
+                throw SkillsCLIError.updateCheckLockInvalid
+            }
+            data.append(contentsOf: buffer.prefix(bytesRead))
+        }
     }
 
     private func writeCanonicalUpdateLock(

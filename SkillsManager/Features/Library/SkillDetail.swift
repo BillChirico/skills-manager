@@ -131,7 +131,7 @@ struct SkillDetail: View {
             if skill.hasUpdate {
                 Label("Reinstall Required", systemImage: "arrow.down.circle")
                     .foregroundStyle(.secondary)
-                    .help(Self.scopedUpdateHelp)
+                    .help(LibraryUpdateGuidance.scopedHelp)
                     .accessibilityLabel(
                         "Update available. Reinstall from a trusted source to update."
                     )
@@ -310,7 +310,10 @@ struct SkillDetail: View {
                 if model.selectedSkills.contains(where: \.hasUpdate) {
                     Label("Reinstall Required", systemImage: "arrow.down.circle")
                         .foregroundStyle(.secondary)
-                        .help(Self.scopedUpdateHelp)
+                        .help(LibraryUpdateGuidance.scopedHelp)
+                        .accessibilityLabel(
+                            "Reinstall Required. \(LibraryUpdateGuidance.scopedHelp)"
+                        )
                 }
 
                 Button(bulkEnablementTitle) {
@@ -343,9 +346,6 @@ struct SkillDetail: View {
         }
         return "Manage the selected skills together."
     }
-
-    private static let scopedUpdateHelp =
-        "The skills CLI cannot safely update one agent folder. Reinstall the skill from a trusted source to update it."
 
     private var bulkEnablementTitle: String {
         model.selectedSkills.allSatisfy { $0.isEnabled == false } ? "Enable" : "Disable"

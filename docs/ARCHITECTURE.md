@@ -45,9 +45,9 @@ update; see
 [Automatic agent-folder detection](#automatic-agent-folder-detection) and
 [Update availability isolation](#update-availability-isolation).
 The library toolbar also exposes a persistent manual check through Command-R and
-a cancellable progress state. The automatic launch-time check is network-capable
-and currently has no consent prompt or preference; Security finding 2 remains a
-residual Low risk pending a product decision.
+a cancellable progress state. Consent behavior for the automatic network-capable
+launch-time check remains an unresolved product decision; Security finding 2
+records this as a residual Low risk.
 `SkillCatalogModel` owns the skills.sh leaderboard, search state, and
 per-destination install outcomes. `SkillCatalogView` rescans each successful
 destination and selects the installed skill.

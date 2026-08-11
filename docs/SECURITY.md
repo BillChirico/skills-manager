@@ -261,10 +261,9 @@ content sandbox:
 
 - **Residual Low — Security finding 2 (pending product decision):** after
   launch-time source restoration, the app automatically starts the
-  network-capable availability probe when its prerequisites are present. There
-  is currently no consent prompt and no preference to disable that automatic
-  check. The manual toolbar control does not resolve this finding, and this
-  revision intentionally does not implement or imply an opt-in or opt-out.
+  network-capable availability probe when its prerequisites are present.
+  Consent behavior remains an unresolved product decision. The manual toolbar
+  control does not resolve this finding.
 - The availability check intentionally executes a mutating, network-capable
   upstream path. Redirected homes, a scrubbed environment, bounded output, and
   deferred deletion of the disposable trees avoid giving that reviewed path an

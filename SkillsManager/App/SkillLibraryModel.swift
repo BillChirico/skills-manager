@@ -447,7 +447,7 @@ final class SkillLibraryModel {
         defer { updateCheckTask = nil }
 
         guard let skillManager else {
-            clearUpdateAvailability(preservingUncheckedSkills: true)
+            clearUpdateAvailability()
             updateCheckState = .unsupported
             return
         }
@@ -479,13 +479,11 @@ final class SkillLibraryModel {
         }
     }
 
-    private func clearUpdateAvailability(preservingUncheckedSkills: Bool = false) {
+    private func clearUpdateAvailability() {
         lastUpdateAvailability = nil
         skills = skills.map { skill in
             var skill = skill
-            if !preservingUncheckedSkills || skill.updateStatus != nil {
-                skill.updateStatus = .unknown
-            }
+            skill.updateStatus = .unknown
             return skill
         }
     }
@@ -783,6 +781,9 @@ final class SkillLibraryModel {
             do {
                 try await persistSources()
                 sourceAccess?.stopAccessing(sourceID: sourceID)
+                if let lastUpdateAvailability {
+                    applyUpdateAvailability(lastUpdateAvailability)
+                }
             } catch {
                 if sources.contains(where: { $0.id == sourceID }) == false {
                     sources.append(removedSource)

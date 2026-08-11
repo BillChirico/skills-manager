@@ -2,6 +2,11 @@ import AppKit
 import SkillsCore
 import SwiftUI
 
+enum LibraryUpdateGuidance {
+    static let scopedHelp =
+        "The skills CLI cannot safely update one agent folder. Reinstall the skill from a trusted source to update it."
+}
+
 struct SkillList: View {
     @Bindable var model: SkillLibraryModel
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
@@ -139,7 +144,7 @@ struct SkillList: View {
             if model.selectedSkills.contains(where: \.hasUpdate) {
                 Label("Reinstall Required", systemImage: "arrow.down.circle")
                     .foregroundStyle(.secondary)
-                    .help(Self.scopedUpdateHelp)
+                    .help(LibraryUpdateGuidance.scopedHelp)
             }
 
             Button("Cancel") {
@@ -158,7 +163,7 @@ struct SkillList: View {
     private func skillContextMenu(_ skill: AgentSkill) -> some View {
         if skill.hasUpdate {
             Label("Reinstall Required", systemImage: "arrow.down.circle")
-                .help(Self.scopedUpdateHelp)
+                .help(LibraryUpdateGuidance.scopedHelp)
 
             Divider()
         }
@@ -196,9 +201,6 @@ struct SkillList: View {
         }
         .disabled(model.isMutating(skill.id))
     }
-
-    private static let scopedUpdateHelp =
-        "The skills CLI cannot safely update one agent folder. Reinstall the skill from a trusted source to update it."
 
     private var removalTitle: String {
         skillIDsPendingRemoval.count == 1 ? "Remove Skill?" : "Remove Selected Skills?"

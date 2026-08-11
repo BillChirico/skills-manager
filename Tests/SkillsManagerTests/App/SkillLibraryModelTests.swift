@@ -481,6 +481,16 @@ struct SkillLibraryModelTests {
         #expect(model.presentedError == nil)
     }
 
+    @Test("A lifecycle manager using the default update opt-out is quietly unavailable")
+    func defaultUpdateOptOutIsQuiet() async {
+        let model = SkillLibraryModel(skillManager: RecordingLifecycleManager())
+
+        await model.refreshUpdateAvailability()
+
+        #expect(model.updateCheckState == .unavailable)
+        #expect(model.presentedError == nil)
+    }
+
     @Test("An update-only identity from an alternate manager fails closed")
     func invalidUpdateAvailabilityFailsClosed() async throws {
         let source = SkillSource(
@@ -769,6 +779,59 @@ struct SkillLibraryModelTests {
         #expect(addedSkill.updateStatus == .unknown)
         #expect(addedSkill.hasUpdate == false)
         #expect(model.updateCheckState == .partial(checked: 1, total: 2))
+    }
+
+    @Test(
+        "Removing a source recomputes partial update coverage",
+        arguments: [true, false]
+    )
+    func sourceRemovalReconcilesUpdateCoverage(removingCheckedSource: Bool) async throws {
+        let checkedSource = SkillSource(
+            name: "Checked",
+            directoryURL: URL(filePath: "/skills/checked")
+        )
+        let uncheckedSource = SkillSource(
+            name: "Unchecked",
+            directoryURL: URL(filePath: "/skills/unchecked")
+        )
+        let checkedSkill = AgentSkill(
+            name: "Checked",
+            summary: "Covered by the probe.",
+            directoryURL: checkedSource.directoryURL.appending(path: "skill"),
+            sourceID: checkedSource.id
+        )
+        let uncheckedSkill = AgentSkill(
+            name: "Unchecked",
+            summary: "Not covered by the probe.",
+            directoryURL: uncheckedSource.directoryURL.appending(path: "skill"),
+            sourceID: uncheckedSource.id
+        )
+        let manager = UpdateAvailabilityManager(
+            result: .success(
+                SkillUpdateAvailability(
+                    checkedSkillDirectoryURLs: [checkedSkill.directoryURL],
+                    updateAvailableSkillDirectoryURLs: []
+                )
+            )
+        )
+        let sources = [checkedSource, uncheckedSource]
+        let model = SkillLibraryModel(
+            sources: sources,
+            skills: [checkedSkill, uncheckedSkill],
+            sourceStore: MemorySourceStore(sources: sources),
+            skillManager: manager
+        )
+        await model.refreshUpdateAvailability()
+        #expect(model.updateCheckState == .partial(checked: 1, total: 2))
+
+        try await model.removeSource(
+            removingCheckedSource ? checkedSource.id : uncheckedSource.id
+        )
+
+        #expect(
+            model.updateCheckState
+                == (removingCheckedSource ? .partial(checked: 0, total: 1) : .current)
+        )
     }
 
     @Test("Restoring automatically adds and scans existing standard agent folders")
