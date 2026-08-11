@@ -46,6 +46,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0D6EC872802E2A1BA2F8CF23 /* 2026-08-02-unsigned-dmg-ci-design.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "2026-08-02-unsigned-dmg-ci-design.md"; sourceTree = "<group>"; };
 		1F32267ADF6DE133229BEE84 /* GlassPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassPanel.swift; sourceTree = "<group>"; };
 		2104245FFF577B2FF9088F8A /* CLAUDE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = CLAUDE.md; sourceTree = "<group>"; };
 		28D3397F722CA129DBB67F0A /* SkillLibraryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryModel.swift; sourceTree = "<group>"; };
@@ -59,6 +60,7 @@
 		5684009393E19775EF010F06 /* 2026-08-01-skills-cli-lifecycle.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "2026-08-01-skills-cli-lifecycle.md"; sourceTree = "<group>"; };
 		6A4E285DCEC62A32FE2BCFD8 /* SkillSourceSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillSourceSidebar.swift; sourceTree = "<group>"; };
 		6A8C0771628A76401D627527 /* 2026-08-01-skills-cli-lifecycle-design.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "2026-08-01-skills-cli-lifecycle-design.md"; sourceTree = "<group>"; };
+		6B049ED011B81392686E95AF /* 2026-08-02-unsigned-dmg-ci.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "2026-08-02-unsigned-dmg-ci.md"; sourceTree = "<group>"; };
 		71E86521947227FAD14E43AA /* SkillsManager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SkillsManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		722F8D554E99C8E055634971 /* SkillSourceAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillSourceAccess.swift; sourceTree = "<group>"; };
 		798333DD8A836A78860F88DF /* SkillDetail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillDetail.swift; sourceTree = "<group>"; };
@@ -203,6 +205,7 @@
 				AF38AD0F106FB2D04588BFCD /* 2026-07-27-folder-settings-review-followup-design.md */,
 				6A8C0771628A76401D627527 /* 2026-08-01-skills-cli-lifecycle-design.md */,
 				CE19D77743D9CA6DF79EB1EF /* 2026-08-02-automatic-agent-folders-design.md */,
+				0D6EC872802E2A1BA2F8CF23 /* 2026-08-02-unsigned-dmg-ci-design.md */,
 			);
 			path = specs;
 			sourceTree = "<group>";
@@ -255,6 +258,7 @@
 				560792EB417C14855F48371C /* 2026-07-27-folder-settings.md */,
 				5684009393E19775EF010F06 /* 2026-08-01-skills-cli-lifecycle.md */,
 				8F6430B326394A9EED272415 /* 2026-08-02-automatic-agent-folders.md */,
+				6B049ED011B81392686E95AF /* 2026-08-02-unsigned-dmg-ci.md */,
 			);
 			path = plans;
 			sourceTree = "<group>";
