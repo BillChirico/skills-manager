@@ -1,6 +1,10 @@
 import Foundation
 import Testing
 
+#if canImport(Darwin)
+    import Darwin
+#endif
+
 @testable import SkillsCore
 
 struct SkillsCLIManagerTests {
@@ -66,6 +70,7 @@ struct SkillsCLIManagerTests {
         #expect(command.environment["DISABLE_TELEMETRY"] == "1")
         #expect(command.environment["DO_NOT_TRACK"] == "1")
         #expect(command.environment["GIT_CONFIG_GLOBAL"] == "/dev/null")
+        #expect(command.environment["GIT_TERMINAL_PROMPT"] == "0")
         #expect(
             command.environment["NPM_CONFIG_GLOBALCONFIG"]
                 == command.currentDirectoryURL.appending(
@@ -690,6 +695,432 @@ struct SkillsCLIManagerTests {
         #expect(await runner.commands.isEmpty)
     }
 
+    @Test("Update availability runs the pinned CLI only inside a disposable home")
+    func updateAvailabilityUsesIsolatedHome() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+        try writeSkillLock(
+            in: homeDirectory,
+            skills: ["swift-testing-pro": makeLockEntry(name: "swift-testing-pro")],
+            extraRootValues: ["lastSelectedAgents": ["claude-code"]]
+        )
+        let runner = UpdateCheckCommandRunner(
+            output:
+                """
+                \u{1B}[38;5;145mChecking for skill updates…\u{1B}[0m
+
+                \r\u{1B}[38;5;102mChecking skills from source: paulhudson/Swift-Testing-Pro\u{1B}[0m\u{1B}[K
+                \r\u{1B}[K\u{1B}[38;5;145mFound 1 global update(s)\u{1B}[0m
+
+                \u{1B}[38;5;145mUpdating swift-testing-pro…\u{1B}[0m
+                  \u{1B}[38;5;145m✓\u{1B}[0m Updated swift-testing-pro
+
+                \u{1B}[38;5;145m✓ Updated 1 skill(s)\u{1B}[0m
+
+                """
+        )
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        let updates = try await manager.checkForUpdates()
+        let command = try #require(await runner.commands.first)
+        let isolatedHomePath = try #require(command.environment["HOME"])
+        let isolatedHome = URL(filePath: isolatedHomePath, directoryHint: .isDirectory)
+        let codexHomePath = try #require(command.environment["CODEX_HOME"])
+        let temporaryDirectoryPath = try #require(command.environment["TMPDIR"])
+        let mirroredLockData = try #require(await runner.mirroredLockData)
+        let mirroredLock = try #require(
+            JSONSerialization.jsonObject(with: mirroredLockData) as? [String: Any]
+        )
+
+        let expectedSkillURLs = expectedUpdateDirectoryURLs(
+            in: homeDirectory,
+            skillName: "swift-testing-pro"
+        )
+        #expect(expectedSkillURLs.count == 1)
+        #expect(updates.checkedSkillDirectoryURLs == expectedSkillURLs)
+        #expect(updates.updateAvailableSkillDirectoryURLs == expectedSkillURLs)
+        #expect(
+            command.arguments
+                == [
+                    "--yes",
+                    "--package",
+                    "skills@1.5.21",
+                    "--",
+                    "skills",
+                    "check",
+                    "--global",
+                    "--yes",
+                ]
+        )
+        #expect(isolatedHome != homeDirectory)
+        #expect(
+            URL(filePath: codexHomePath, directoryHint: .isDirectory).standardizedFileURL
+                == isolatedHome.appending(
+                    path: ".agents",
+                    directoryHint: .isDirectory
+                ).standardizedFileURL
+        )
+        #expect(
+            URL(filePath: temporaryDirectoryPath, directoryHint: .isDirectory)
+                .deletingLastPathComponent().standardizedFileURL
+                == isolatedHome.standardizedFileURL
+        )
+        #expect(await runner.temporaryDirectoryExisted)
+        #expect(command.environment["SECRET_TOKEN"] == nil)
+        #expect(mirroredLock["version"] as? Int == 3)
+        #expect(mirroredLock["lastSelectedAgents"] == nil)
+        #expect(
+            FileManager.default.fileExists(atPath: isolatedHome.path(percentEncoded: false))
+                == false
+        )
+        #expect(
+            FileManager.default.fileExists(
+                atPath: command.currentDirectoryURL.path(percentEncoded: false)
+            ) == false
+        )
+    }
+
+    @Test("Out-of-order update output fails closed")
+    func updateAvailabilityRejectsOutOfOrderOutput() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+        try writeSkillLock(
+            in: homeDirectory,
+            skills: ["swift-testing-pro": makeLockEntry(name: "swift-testing-pro")]
+        )
+        let runner = UpdateCheckCommandRunner(
+            output:
+                """
+                Checking for skill updates…
+                Checking skills from source: paulhudson/Swift-Testing-Pro
+                Found 1 global update(s)
+                ✓ Updated 1 skill(s)
+                Updating swift-testing-pro…
+                  ✓ Updated swift-testing-pro
+                """
+        )
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        await #expect(throws: SkillsCLIError.updateCheckOutputInvalid) {
+            try await manager.checkForUpdates()
+        }
+    }
+
+    @Test("A confirmed no-update transcript identifies the checked skill")
+    func updateAvailabilityParsesNoUpdates() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+        try writeSkillLock(
+            in: homeDirectory,
+            skills: ["swift-testing-pro": makeLockEntry(name: "swift-testing-pro")]
+        )
+        let runner = UpdateCheckCommandRunner(
+            output:
+                """
+                Checking for skill updates…
+
+                Checking skills from source: paulhudson/Swift-Testing-Pro
+                ✓ All global skills are up to date
+
+                """
+        )
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        let updates = try await manager.checkForUpdates()
+
+        #expect(
+            updates.checkedSkillDirectoryURLs
+                == expectedUpdateDirectoryURLs(
+                    in: homeDirectory,
+                    skillName: "swift-testing-pro"
+                )
+        )
+        #expect(updates.updateAvailableSkillDirectoryURLs.isEmpty)
+    }
+
+    @Test("An empty valid lock reports that no installed names were checked")
+    func updateAvailabilityPreservesEmptyLockAsUnchecked() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+        try writeSkillLock(in: homeDirectory, skills: [:])
+        let runner = UpdateCheckCommandRunner(output: "")
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        let availability = try await manager.checkForUpdates()
+
+        #expect(availability.checkedSkillDirectoryURLs.isEmpty)
+        #expect(availability.updateAvailableSkillDirectoryURLs.isEmpty)
+        #expect(await runner.commands.isEmpty)
+    }
+
+    @Test("Unknown update output fails closed and cleans every temporary path")
+    func updateAvailabilityRejectsUnknownOutput() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+        try writeSkillLock(
+            in: homeDirectory,
+            skills: ["swift-testing-pro": makeLockEntry(name: "swift-testing-pro")]
+        )
+        let runner = UpdateCheckCommandRunner(
+            output:
+                """
+                Checking for skill updates…
+                attacker-controlled diagnostic
+                ✓ All global skills are up to date
+                """
+        )
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        await #expect(throws: SkillsCLIError.updateCheckOutputInvalid) {
+            try await manager.checkForUpdates()
+        }
+
+        let command = try #require(await runner.commands.first)
+        let isolatedHomePath = try #require(command.environment["HOME"])
+        #expect(FileManager.default.fileExists(atPath: isolatedHomePath) == false)
+        #expect(
+            FileManager.default.fileExists(
+                atPath: command.currentDirectoryURL.path(percentEncoded: false)
+            ) == false
+        )
+    }
+
+    @Test("Inconsistent update counts fail closed")
+    func updateAvailabilityRejectsCountMismatch() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+        try writeSkillLock(
+            in: homeDirectory,
+            skills: ["swift-testing-pro": makeLockEntry(name: "swift-testing-pro")]
+        )
+        let runner = UpdateCheckCommandRunner(
+            output:
+                """
+                Checking for skill updates…
+                Checking skills from source: paulhudson/Swift-Testing-Pro
+                Found 2 global update(s)
+                Updating swift-testing-pro…
+                  ✓ Updated swift-testing-pro
+                ✓ Updated 1 skill(s)
+                """
+        )
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        await #expect(throws: SkillsCLIError.updateCheckOutputInvalid) {
+            try await manager.checkForUpdates()
+        }
+    }
+
+    @Test("Oversized CLI output fails closed without loading it")
+    func updateAvailabilityRejectsOversizedOutput() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+        try writeSkillLock(
+            in: homeDirectory,
+            skills: ["swift-testing-pro": makeLockEntry(name: "swift-testing-pro")]
+        )
+        let runner = UpdateCheckCommandRunner(
+            outputData: Data(repeating: 0x41, count: SkillsCLIManager.maximumUpdateOutputBytes + 1)
+        )
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        await #expect(throws: SkillsCLIError.updateCheckOutputInvalid) {
+            try await manager.checkForUpdates()
+        }
+    }
+
+    @Test("An invalid or symbolic lock never launches the CLI", arguments: [false, true])
+    func updateAvailabilityRejectsUnsafeLock(isSymbolicLink: Bool) async throws {
+        let fixtureRoot = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: fixtureRoot) }
+        let homeDirectory = fixtureRoot.appending(path: "home", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: homeDirectory, withIntermediateDirectories: true)
+        let lockDirectory = homeDirectory.appending(path: ".agents", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: lockDirectory, withIntermediateDirectories: true)
+        let lockURL = lockDirectory.appending(path: ".skill-lock.json")
+
+        if isSymbolicLink {
+            let target = fixtureRoot.appending(path: "outside-lock.json")
+            try Data("{\"version\":3,\"skills\":{}}".utf8).write(to: target)
+            try FileManager.default.createSymbolicLink(at: lockURL, withDestinationURL: target)
+        } else {
+            try Data("{\"version\":2,\"skills\":{}}".utf8).write(to: lockURL)
+        }
+
+        let runner = UpdateCheckCommandRunner(output: "")
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        await #expect(throws: SkillsCLIError.updateCheckLockInvalid) {
+            try await manager.checkForUpdates()
+        }
+        #expect(await runner.commands.isEmpty)
+    }
+
+    @Test("A missing global lock is distinct from a malformed lock")
+    func updateAvailabilityReportsMissingLock() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+        let runner = UpdateCheckCommandRunner(output: "")
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        do {
+            _ = try await manager.checkForUpdates()
+            Issue.record("Expected a missing-lock error")
+        } catch let error as SkillsCLIError {
+            #expect(error == .updateCheckLockMissing)
+        } catch {
+            Issue.record("Wrong error thrown: \(error)")
+        }
+        #expect(await runner.commands.isEmpty)
+    }
+
+    @Test("An oversized lock never launches the CLI")
+    func updateAvailabilityRejectsOversizedLock() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+        let lockDirectory = homeDirectory.appending(path: ".agents", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: lockDirectory, withIntermediateDirectories: true)
+        try Data(repeating: 0x20, count: SkillsCLIManager.maximumUpdateLockBytes + 1).write(
+            to: lockDirectory.appending(path: ".skill-lock.json")
+        )
+        let runner = UpdateCheckCommandRunner(output: "")
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        await #expect(throws: SkillsCLIError.updateCheckLockInvalid) {
+            try await manager.checkForUpdates()
+        }
+        #expect(await runner.commands.isEmpty)
+    }
+
+    @Test("Malformed remote source metadata never launches the CLI")
+    func updateAvailabilityRejectsMalformedSource() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+        var entry = makeLockEntry(name: "swift-testing-pro")
+        entry["source"] = "../sensitive"
+        try writeSkillLock(
+            in: homeDirectory,
+            skills: ["swift-testing-pro": entry]
+        )
+        let runner = UpdateCheckCommandRunner(output: "")
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        await #expect(throws: SkillsCLIError.updateCheckLockInvalid) {
+            try await manager.checkForUpdates()
+        }
+        #expect(await runner.commands.isEmpty)
+    }
+
+    @Test("A lock entry without skillPath never launches the CLI")
+    func updateAvailabilityRejectsMissingSkillPath() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+        var entry = makeLockEntry(name: "swift-testing-pro")
+        entry.removeValue(forKey: "skillPath")
+        try writeSkillLock(
+            in: homeDirectory,
+            skills: ["swift-testing-pro": entry]
+        )
+        let runner = UpdateCheckCommandRunner(output: "")
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        await #expect(throws: SkillsCLIError.updateCheckLockInvalid) {
+            try await manager.checkForUpdates()
+        }
+        #expect(await runner.commands.isEmpty)
+    }
+
+    @Test("Entries grouped under one source must agree on remote metadata")
+    func updateAvailabilityRejectsInconsistentSourceGroup() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+        let firstEntry = makeLockEntry(name: "swift-testing-pro")
+        var secondEntry = makeLockEntry(name: "swiftui-pro")
+        secondEntry["ref"] = "release"
+        try writeSkillLock(
+            in: homeDirectory,
+            skills: [
+                "swift-testing-pro": firstEntry,
+                "swiftui-pro": secondEntry,
+            ]
+        )
+        let runner = UpdateCheckCommandRunner(output: "")
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        await #expect(throws: SkillsCLIError.updateCheckLockInvalid) {
+            try await manager.checkForUpdates()
+        }
+        #expect(await runner.commands.isEmpty)
+    }
+
+    @Test("Generic Git locks accept their 64-character folder hashes")
+    func updateAvailabilityAcceptsGenericGitHash() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+        var entry = makeLockEntry(name: "swift-testing-pro")
+        entry["source"] = "https://git.example.com/acme/skills.git"
+        entry["sourceType"] = "git"
+        entry["sourceUrl"] = "https://git.example.com/acme/skills.git"
+        entry["skillFolderHash"] = String(repeating: "b", count: 64)
+        try writeSkillLock(
+            in: homeDirectory,
+            skills: ["swift-testing-pro": entry]
+        )
+        let runner = UpdateCheckCommandRunner(
+            output:
+                """
+                Checking for skill updates…
+                Checking skills from source: https://git.example.com/acme/skills.git
+                ✓ All global skills are up to date
+                """
+        )
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        let updates = try await manager.checkForUpdates()
+
+        #expect(
+            updates.checkedSkillDirectoryURLs
+                == expectedUpdateDirectoryURLs(
+                    in: homeDirectory,
+                    skillName: "swift-testing-pro"
+                )
+        )
+        #expect(updates.updateAvailableSkillDirectoryURLs.isEmpty)
+    }
+
+    @Test(
+        "Every process failure removes the disposable home and working directory",
+        arguments: [
+            SkillsCLIError.commandCouldNotLaunch,
+            .commandFailed(exitCode: 23),
+            .commandTimedOut,
+            .commandCancelled,
+        ]
+    )
+    func updateAvailabilityCleansUpAfterProcessFailure(error: SkillsCLIError) async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+        try writeSkillLock(
+            in: homeDirectory,
+            skills: ["swift-testing-pro": makeLockEntry(name: "swift-testing-pro")]
+        )
+        let runner = UpdateCheckCommandRunner(output: "", error: error)
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        await #expect(throws: error) {
+            try await manager.checkForUpdates()
+        }
+
+        let command = try #require(await runner.commands.first)
+        let isolatedHomePath = try #require(command.environment["HOME"])
+        #expect(FileManager.default.fileExists(atPath: isolatedHomePath) == false)
+        #expect(
+            FileManager.default.fileExists(
+                atPath: command.currentDirectoryURL.path(percentEncoded: false)
+            ) == false
+        )
+    }
+
     @Test("The Foundation runner reports nonzero exit status")
     func processFailure() async throws {
         let runner = FoundationProcessCommandRunner()
@@ -703,6 +1134,69 @@ struct SkillsCLIManagerTests {
         await #expect(throws: SkillsCLIError.commandFailed(exitCode: 1)) {
             try await runner.run(command)
         }
+    }
+
+    @Test("The Foundation runner captures stdout within an explicit byte limit")
+    func processOutputCapture() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let runner = FoundationProcessCommandRunner()
+        let command = ProcessCommand(
+            executableURL: URL(filePath: "/bin/sh"),
+            arguments: ["-c", "printf 'update-result'"],
+            environment: ["PATH": "/usr/bin:/bin"],
+            currentDirectoryURL: directory,
+            maximumStandardOutputBytes: 32
+        )
+
+        let output = try #require(try await runner.run(command))
+
+        #expect(output == Data("update-result".utf8))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+    }
+
+    @Test("Captured stdout has no child-visible working-directory artifact")
+    func processOutputCaptureIsPipeOnly() async throws {
+        let workingDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: workingDirectory) }
+        let runner = FoundationProcessCommandRunner()
+        let command = ProcessCommand(
+            executableURL: URL(filePath: "/bin/sh"),
+            arguments: [
+                "-c",
+                "if [ -e update-check.stdout ]; then printf 'artifact'; else printf 'pipe-only'; fi",
+            ],
+            environment: ["PATH": "/usr/bin:/bin"],
+            currentDirectoryURL: workingDirectory,
+            maximumStandardOutputBytes: 32
+        )
+
+        let output = try #require(try await runner.run(command))
+
+        #expect(output == Data("pipe-only".utf8))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: workingDirectory.path).isEmpty)
+    }
+
+    @Test("The Foundation runner terminates output that exceeds its byte limit")
+    func processOutputLimit() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let runner = FoundationProcessCommandRunner(terminationGracePeriod: 0.05)
+        let command = ProcessCommand(
+            executableURL: URL(filePath: "/bin/sh"),
+            arguments: ["-c", "while :; do printf '0123456789'; done"],
+            environment: ["PATH": "/usr/bin:/bin"],
+            currentDirectoryURL: directory,
+            maximumStandardOutputBytes: 32
+        )
+        let clock = ContinuousClock()
+        let start = clock.now
+
+        await #expect(throws: SkillsCLIError.updateCheckOutputInvalid) {
+            try await runner.run(command)
+        }
+
+        #expect(start.duration(to: clock.now) < .seconds(2))
     }
 
     @Test("The Foundation runner terminates a command at its deadline")
@@ -757,6 +1251,94 @@ struct SkillsCLIManagerTests {
         }
     }
 
+    @Test("Cancelling a captured command closes its reader without a descriptor race")
+    func processOutputCancellation() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let readinessURL = directory.appending(path: "ready")
+        let runner = FoundationProcessCommandRunner(
+            timeout: 30,
+            terminationGracePeriod: 0.05
+        )
+        let command = ProcessCommand(
+            executableURL: URL(filePath: "/bin/sh"),
+            arguments: [
+                "-c",
+                "printf ready > \"$1\"; printf x; trap '' TERM; while :; do :; done",
+                "sh",
+                readinessURL.path(percentEncoded: false),
+            ],
+            environment: ["PATH": "/usr/bin:/bin"],
+            currentDirectoryURL: directory,
+            maximumStandardOutputBytes: 1_024
+        )
+        let task = Task {
+            try await runner.run(command)
+        }
+        var didLaunch = false
+        for _ in 0..<100 {
+            if FileManager.default.fileExists(
+                atPath: readinessURL.path(percentEncoded: false)
+            ) {
+                didLaunch = true
+                break
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        guard didLaunch else {
+            task.cancel()
+            _ = await task.result
+            Issue.record("The captured subprocess did not signal readiness")
+            return
+        }
+        let clock = ContinuousClock()
+        let start = clock.now
+
+        task.cancel()
+
+        await #expect(throws: SkillsCLIError.commandCancelled) {
+            try await task.value
+        }
+        #expect(start.duration(to: clock.now) < .seconds(2))
+    }
+
+    #if os(macOS)
+        @Test("An inherited stdout writer cannot wedge output draining")
+        func processOutputDrainDeadline() async throws {
+            let directory = try makeTemporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let childPIDURL = directory.appending(path: "child-pid")
+            defer {
+                if let pidText = try? String(contentsOf: childPIDURL, encoding: .utf8),
+                    let pid = Int32(pidText)
+                {
+                    _ = Darwin.kill(pid, SIGKILL)
+                }
+            }
+            let runner = FoundationProcessCommandRunner()
+            let command = ProcessCommand(
+                executableURL: URL(filePath: "/bin/sh"),
+                arguments: [
+                    "-c",
+                    "trap '' HUP; sleep 30 & printf '%s' \"$!\" > \"$1\"; printf 'parent-finished'",
+                    "sh",
+                    childPIDURL.path(percentEncoded: false),
+                ],
+                environment: ["PATH": "/usr/bin:/bin"],
+                currentDirectoryURL: directory,
+                maximumStandardOutputBytes: 32
+            )
+            let clock = ContinuousClock()
+            let start = clock.now
+
+            await #expect(throws: SkillsCLIError.updateCheckOutputInvalid) {
+                try await runner.run(command)
+            }
+
+            #expect(start.duration(to: clock.now) < .seconds(2))
+        }
+    #endif
+
     @Test("Lifecycle commands stay serialized while the process runner is suspended")
     func serializesCommands() async throws {
         let homeDirectory = try makeTemporaryDirectory()
@@ -787,6 +1369,42 @@ struct SkillsCLIManagerTests {
         _ = try await secondInstall.value
 
         #expect(await runner.commands.count == 2)
+    }
+
+    @Test(
+        "A queued update check observes cancellation before the active command finishes"
+    )
+    func queuedUpdateCheckIsCancellationAware() async throws {
+        let homeDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+        try writeSkillLock(
+            in: homeDirectory,
+            skills: ["swift-testing-pro": makeLockEntry(name: "swift-testing-pro")]
+        )
+        let source = try makeSource(agent: .claudeCode, homeDirectory: homeDirectory)
+        let runner = SuspendingCommandRunner(sourceDirectory: source.directoryURL)
+        let manager = makeManager(homeDirectory: homeDirectory, runner: runner)
+
+        let install = Task {
+            try await manager.install(makeCatalogSkill(slug: "first-skill"), into: source)
+        }
+        await runner.waitUntilFirstCommandStarted()
+
+        let updateCheck = Task {
+            try await manager.checkForUpdates()
+        }
+        for _ in 0..<10 {
+            await Task.yield()
+        }
+        updateCheck.cancel()
+
+        await #expect(throws: CancellationError.self) {
+            try await updateCheck.value
+        }
+        #expect(await runner.commands.count == 1)
+
+        await runner.resumeFirstCommand()
+        _ = try await install.value
     }
 
     @Test("A failed command releases the lifecycle operation gate")
@@ -879,6 +1497,52 @@ struct SkillsCLIManagerTests {
             source: "paulhudson/Swift-Testing-Pro",
             installs: 6_900
         )
+    }
+
+    private func makeLockEntry(name: String) -> [String: Any] {
+        [
+            "source": "paulhudson/Swift-Testing-Pro",
+            "sourceType": "github",
+            "sourceUrl": "https://github.com/paulhudson/Swift-Testing-Pro",
+            "ref": "main",
+            "skillPath": "skills/\(name)/SKILL.md",
+            "skillFolderHash": String(repeating: "a", count: 40),
+            "installedAt": "2026-08-01T00:00:00.000Z",
+            "updatedAt": "2026-08-01T00:00:00.000Z",
+        ]
+    }
+
+    private func expectedUpdateDirectoryURLs(
+        in homeDirectory: URL,
+        skillName: String
+    ) -> Set<URL> {
+        [
+            homeDirectory.appending(
+                path: ".agents/skills/\(skillName)",
+                directoryHint: .isDirectory
+            )
+        ]
+    }
+
+    private func writeSkillLock(
+        in homeDirectory: URL,
+        skills: [String: [String: Any]],
+        extraRootValues: [String: Any] = [:]
+    ) throws {
+        let lockDirectory = homeDirectory.appending(path: ".agents", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(
+            at: lockDirectory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+
+        var object: [String: Any] = [
+            "version": 3,
+            "skills": skills,
+        ]
+        object.merge(extraRootValues) { _, new in new }
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        try data.write(to: lockDirectory.appending(path: ".skill-lock.json"))
     }
 
     private func makeManager(
@@ -984,9 +1648,51 @@ private actor RecordingCommandRunner: ProcessCommandRunning {
         self.operation = { _ in }
     }
 
-    func run(_ command: ProcessCommand) async throws {
+    func run(_ command: ProcessCommand) async throws -> Data? {
         commands.append(command)
         try operation(command)
+        return nil
+    }
+}
+
+private actor UpdateCheckCommandRunner: ProcessCommandRunning {
+    private(set) var commands: [ProcessCommand] = []
+    private(set) var mirroredLockData: Data?
+    private(set) var temporaryDirectoryExisted = false
+    private let outputData: Data
+    private let error: SkillsCLIError?
+
+    init(output: String, error: SkillsCLIError? = nil) {
+        self.outputData = Data(output.utf8)
+        self.error = error
+    }
+
+    init(outputData: Data, error: SkillsCLIError? = nil) {
+        self.outputData = outputData
+        self.error = error
+    }
+
+    func run(_ command: ProcessCommand) async throws -> Data? {
+        commands.append(command)
+
+        if let homePath = command.environment["HOME"] {
+            let mirrorURL = URL(filePath: homePath, directoryHint: .isDirectory).appending(
+                path: ".agents/.skill-lock.json",
+                directoryHint: .notDirectory
+            )
+            mirroredLockData = try Data(contentsOf: mirrorURL)
+        }
+
+        if let temporaryDirectoryPath = command.environment["TMPDIR"] {
+            temporaryDirectoryExisted = FileManager.default.fileExists(
+                atPath: temporaryDirectoryPath
+            )
+        }
+
+        if let error {
+            throw error
+        }
+        return outputData
     }
 }
 
@@ -999,7 +1705,7 @@ private actor SuspendingCommandRunner: ProcessCommandRunning {
         self.sourceDirectory = sourceDirectory
     }
 
-    func run(_ command: ProcessCommand) async throws {
+    func run(_ command: ProcessCommand) async throws -> Data? {
         commands.append(command)
         if commands.count == 1 {
             await withCheckedContinuation { continuation in
@@ -1017,6 +1723,7 @@ private actor SuspendingCommandRunner: ProcessCommandRunning {
         try SkillsCLIManagerTests.writeManifest(
             in: sourceDirectory.appending(path: slug, directoryHint: .isDirectory)
         )
+        return nil
     }
 
     func waitUntilFirstCommandStarted() async {
@@ -1039,7 +1746,7 @@ private actor FailingThenSucceedingCommandRunner: ProcessCommandRunning {
         self.sourceDirectory = sourceDirectory
     }
 
-    func run(_ command: ProcessCommand) async throws {
+    func run(_ command: ProcessCommand) async throws -> Data? {
         commandCount += 1
         if commandCount == 1 {
             throw SkillsCLIError.commandTimedOut
@@ -1055,5 +1762,6 @@ private actor FailingThenSucceedingCommandRunner: ProcessCommandRunning {
         try SkillsCLIManagerTests.writeManifest(
             in: sourceDirectory.appending(path: slug, directoryHint: .isDirectory)
         )
+        return nil
     }
 }

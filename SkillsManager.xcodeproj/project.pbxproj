@@ -47,6 +47,7 @@
 
 /* Begin PBXFileReference section */
 		0D6EC872802E2A1BA2F8CF23 /* 2026-08-02-unsigned-dmg-ci-design.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "2026-08-02-unsigned-dmg-ci-design.md"; sourceTree = "<group>"; };
+		198723D699BCD30D33FEE07E /* 2026-08-02-update-availability-design.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "2026-08-02-update-availability-design.md"; sourceTree = "<group>"; };
 		1F32267ADF6DE133229BEE84 /* GlassPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassPanel.swift; sourceTree = "<group>"; };
 		2104245FFF577B2FF9088F8A /* CLAUDE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = CLAUDE.md; sourceTree = "<group>"; };
 		28D3397F722CA129DBB67F0A /* SkillLibraryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryModel.swift; sourceTree = "<group>"; };
@@ -66,7 +67,9 @@
 		798333DD8A836A78860F88DF /* SkillDetail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillDetail.swift; sourceTree = "<group>"; };
 		7F3256AD67D63F0F51359FC2 /* SECURITY.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = SECURITY.md; sourceTree = "<group>"; };
 		8091891E4D7B5CB7043BACC1 /* SkillAgent+Presentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillAgent+Presentation.swift"; sourceTree = "<group>"; };
+		89F902DB3A95D5467DE0CDC7 /* 2026-08-02-volvox-27-review-remediation.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "2026-08-02-volvox-27-review-remediation.md"; sourceTree = "<group>"; };
 		8A6FD9583210F461B8C10058 /* SkillLibraryModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryModelTests.swift; sourceTree = "<group>"; };
+		8BE49DBE58898379BCA43E65 /* 2026-08-02-update-availability.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "2026-08-02-update-availability.md"; sourceTree = "<group>"; };
 		8F6430B326394A9EED272415 /* 2026-08-02-automatic-agent-folders.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "2026-08-02-automatic-agent-folders.md"; sourceTree = "<group>"; };
 		9012D9D210AEF08DCBE01777 /* ARCHITECTURE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ARCHITECTURE.md; sourceTree = "<group>"; };
 		93A141CC23CA196562F6ACF7 /* ToolbarSearchFieldWidth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolbarSearchFieldWidth.swift; sourceTree = "<group>"; };
@@ -206,6 +209,7 @@
 				6A8C0771628A76401D627527 /* 2026-08-01-skills-cli-lifecycle-design.md */,
 				CE19D77743D9CA6DF79EB1EF /* 2026-08-02-automatic-agent-folders-design.md */,
 				0D6EC872802E2A1BA2F8CF23 /* 2026-08-02-unsigned-dmg-ci-design.md */,
+				198723D699BCD30D33FEE07E /* 2026-08-02-update-availability-design.md */,
 			);
 			path = specs;
 			sourceTree = "<group>";
@@ -259,6 +263,8 @@
 				5684009393E19775EF010F06 /* 2026-08-01-skills-cli-lifecycle.md */,
 				8F6430B326394A9EED272415 /* 2026-08-02-automatic-agent-folders.md */,
 				6B049ED011B81392686E95AF /* 2026-08-02-unsigned-dmg-ci.md */,
+				8BE49DBE58898379BCA43E65 /* 2026-08-02-update-availability.md */,
+				89F902DB3A95D5467DE0CDC7 /* 2026-08-02-volvox-27-review-remediation.md */,
 			);
 			path = plans;
 			sourceTree = "<group>";

@@ -2,8 +2,14 @@ import AppKit
 import SkillsCore
 import SwiftUI
 
+enum LibraryUpdateGuidance {
+    static let scopedHelp =
+        "The skills CLI cannot safely update one agent folder. Reinstall the skill from a trusted source to update it."
+}
+
 struct SkillList: View {
     @Bindable var model: SkillLibraryModel
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @State private var skillIDsPendingRemoval: Set<AgentSkill.ID> = []
 
     var body: some View {
@@ -34,6 +40,23 @@ struct SkillList: View {
             }
         }
         .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 460)
+        .animation(
+            accessibilityReduceMotion ? nil : .snappy(duration: 0.25),
+            value: model.updateCheckState
+        )
+        .animation(
+            accessibilityReduceMotion ? nil : .snappy(duration: 0.25),
+            value: model.visibleSkills.map(\.id)
+        )
+        .onChange(of: model.updateCheckState) { oldState, newState in
+            guard oldState == .checking, newState != .checking else {
+                return
+            }
+            AccessibilityNotification.Announcement(
+                model.updateCheckCompletionAnnouncement
+            )
+            .post()
+        }
         .confirmationDialog(
             removalTitle,
             isPresented: Binding(
@@ -63,7 +86,18 @@ struct SkillList: View {
 
     private var emptyState: some View {
         ContentUnavailableView {
-            Label(emptyContent.title, systemImage: emptyContent.systemImage)
+            if model.updateCheckState == .checking {
+                VStack(spacing: SkillsManagerSpacing.small) {
+                    ProgressView()
+                        .controlSize(.regular)
+                    Text(emptyContent.title)
+                        .font(.title3)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Checking for updates")
+            } else {
+                Label(emptyContent.title, systemImage: emptyContent.systemImage)
+            }
         } description: {
             Text(emptyContent.description)
         } actions: {
@@ -87,6 +121,14 @@ struct SkillList: View {
                 Button("Search All Skills") {
                     model.searchAllSkills()
                 }
+            case .checkForUpdates:
+                Button("Check Again") {
+                    model.startUpdateAvailabilityRefresh()
+                }
+            case .cancelUpdateCheck:
+                Button("Cancel") {
+                    model.cancelUpdateAvailabilityRefresh()
+                }
             case nil:
                 EmptyView()
             }
@@ -99,17 +141,11 @@ struct SkillList: View {
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
 
-            Button(bulkUpdateTitle, systemImage: "arrow.down.circle") {
-                let skillIDs = model.selectedSkillIDs
-                Task { @MainActor in
-                    await model.updateSkills(skillIDs)
-                }
+            if model.selectedSkills.contains(where: \.hasUpdate) {
+                Label("Reinstall Required", systemImage: "arrow.down.circle")
+                    .foregroundStyle(.secondary)
+                    .help(LibraryUpdateGuidance.scopedHelp)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(
-                selectedSkillsWithUpdates.isEmpty
-                    || model.selectedSkills.contains { model.isMutating($0.id) }
-            )
 
             Button("Cancel") {
                 model.selectedSkillIDs.removeAll()
@@ -126,12 +162,10 @@ struct SkillList: View {
     @ViewBuilder
     private func skillContextMenu(_ skill: AgentSkill) -> some View {
         if skill.hasUpdate {
-            Button("Update", systemImage: "arrow.down.circle") {
-                Task { @MainActor in
-                    await model.updateSkills([skill.id])
-                }
-            }
-            .disabled(model.isMutating(skill.id))
+            Label("Reinstall Required", systemImage: "arrow.down.circle")
+                .help(LibraryUpdateGuidance.scopedHelp)
+
+            Divider()
         }
 
         Button(
@@ -166,14 +200,6 @@ struct SkillList: View {
             skillIDsPendingRemoval = [skill.id]
         }
         .disabled(model.isMutating(skill.id))
-    }
-
-    private var selectedSkillsWithUpdates: Set<AgentSkill.ID> {
-        Set(model.selectedSkills.filter(\.hasUpdate).map(\.id))
-    }
-
-    private var bulkUpdateTitle: String {
-        model.selectedSkillIDs.count == 2 ? "Update Both" : "Update Selected"
     }
 
     private var removalTitle: String {
@@ -218,12 +244,52 @@ struct SkillList: View {
                 action: .rescan(sourceID)
             )
         case .updatesAvailable:
-            return EmptyContent(
-                title: "All Skills Are Up to Date",
-                systemImage: "checkmark.circle",
-                description: "There are no updates available.",
-                action: nil
-            )
+            switch model.updateCheckState {
+            case .idle:
+                return EmptyContent(
+                    title: "Updates Not Checked",
+                    systemImage: "arrow.clockwise.circle",
+                    description: "Check the tracked skills for available updates.",
+                    action: .checkForUpdates
+                )
+            case .checking:
+                return EmptyContent(
+                    title: "Checking for Updates",
+                    systemImage: "arrow.triangle.2.circlepath.circle",
+                    description: "Comparing tracked skills with their remote sources.",
+                    action: .cancelUpdateCheck
+                )
+            case .partial(let checked, let total):
+                return EmptyContent(
+                    title: "No Updates Found",
+                    systemImage: "questionmark.circle",
+                    description:
+                        "Checked \(checked) of \(total) skills. Skills outside ~/.agents/skills were not checked.",
+                    action: .checkForUpdates
+                )
+            case .current:
+                return EmptyContent(
+                    title: "All Skills Are Up to Date",
+                    systemImage: "checkmark.circle",
+                    description: "There are no updates available.",
+                    action: nil
+                )
+            case .unsupported:
+                return EmptyContent(
+                    title: "Update Checking Requires Node.js",
+                    systemImage: "terminal",
+                    description: "Install Node.js 22.20 or newer, then check again.",
+                    action: .checkForUpdates
+                )
+            case .unavailable:
+                return EmptyContent(
+                    title: "Update Status Unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description:
+                        "No tracked global lock was found, or update availability could not be determined safely.",
+                    action: .checkForUpdates
+                )
+            }
         case .disabled:
             return EmptyContent(
                 title: "No Disabled Skills",
@@ -305,9 +371,36 @@ private struct SkillRow: View {
                 }
 
                 if skill.hasUpdate {
-                    Image(systemName: "arrow.down.circle")
-                        .foregroundStyle(isSelected ? Color.white : Color.accentColor)
-                        .accessibilityLabel("Update available")
+                    Text("Update")
+                        .font(.caption2.weight(.semibold))
+                        .textCase(.uppercase)
+                        .foregroundStyle(isSelected ? Color.white : Color.primary)
+                        .padding(.horizontal, SkillsManagerSpacing.small)
+                        .padding(.vertical, SkillsManagerSpacing.extraSmall)
+                        .background(
+                            isSelected
+                                ? Color.white.opacity(0.28)
+                                : Color.accentColor.opacity(0.15),
+                            in: .capsule
+                        )
+                        .overlay {
+                            Capsule()
+                                .strokeBorder(
+                                    isSelected
+                                        ? Color.white.opacity(0.35)
+                                        : Color.accentColor.opacity(0.25),
+                                    lineWidth: 0.5
+                                )
+                        }
+                        .accessibilityHidden(true)
+                } else if skill.updateStatus == .unknown {
+                    Text("Not checked")
+                        .font(.caption2)
+                        .foregroundStyle(
+                            isSelected
+                                ? Color.white.opacity(0.78)
+                                : Color.secondary
+                        )
                 }
 
                 if skill.isEnabled == false {
@@ -331,6 +424,7 @@ private struct SkillRow: View {
             agentName,
             sourceName,
             skill.hasUpdate ? "Update available" : nil,
+            skill.updateStatus == .unknown ? "Update status not checked" : nil,
             skill.isEnabled ? nil : "Disabled",
             isMutating ? "Operation in progress" : nil,
         ]
@@ -344,6 +438,8 @@ private struct EmptyContent {
         case manageFolders
         case rescan(SkillSource.ID)
         case searchAll
+        case checkForUpdates
+        case cancelUpdateCheck
     }
 
     let title: String

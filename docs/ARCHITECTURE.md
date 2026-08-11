@@ -26,17 +26,28 @@ network, filesystem, persistence, or process work directly.
 
 `SkillsManagerApp` creates one `SkillsCLIManager` and injects that same actor into
 the catalog and library models. Sharing the instance ensures catalog installs and
-library updates or removals pass through one serialized mutation boundary.
+library availability checks, updates, or removals pass through one serialized
+operation boundary.
 
 `SkillLibraryModel` coordinates configured sources, restoration, discovery,
-selection, scoped search, and lifecycle results. Update and remove methods are
-asynchronous, expose per-skill busy state, preserve failed items, and rescan disk
-after successes. Restoration also detects every supported agent's standard
-directory that already exists under the account home, merges new candidates
-with persisted sources and their durable removal exclusions, publishes the
-reconciled configuration in memory, and attempts an atomic normalization save
-without making scanning depend on that save succeeding; see
-[Automatic agent-folder detection](#automatic-agent-folder-detection).
+selection, scoped search, update availability, and lifecycle results. Update and
+remove methods are asynchronous, expose per-skill busy state, preserve failed
+items, and rescan disk after successes. Restoration also detects every supported
+agent's standard directory that already exists under the account home, merges
+new candidates with persisted sources and their durable removal exclusions,
+publishes the reconciled configuration in memory, and attempts an atomic
+normalization save without making scanning depend on that save succeeding. Once
+all restored-source scans finish, the model automatically performs one serialized
+availability check. It receives exact checked Global-directory URL identities
+separately from the update-available subset, canonicalizes them, and applies
+authoritative state only to unique installed-URL matches in one main-actor
+update; see
+[Automatic agent-folder detection](#automatic-agent-folder-detection) and
+[Update availability isolation](#update-availability-isolation).
+The library toolbar also exposes a persistent manual check through Command-R and
+a cancellable progress state. Consent behavior for the automatic network-capable
+launch-time check remains an unresolved product decision; Security finding 2
+records this as a residual Low risk.
 `SkillCatalogModel` owns the skills.sh leaderboard, search state, and
 per-destination install outcomes. `SkillCatalogView` rescans each successful
 destination and selects the installed skill.
@@ -59,7 +70,7 @@ explicitly destructive CLI action.
 - filtering, search, and deterministic sorters;
 - `SkillCatalogSearching` and the skills.sh client;
 - `CatalogIdentifier` and `SkillInstallCommand` for untrusted catalog fields;
-- `SkillManaging`, the injected install/update/remove boundary; and
+- `SkillManaging`, the injected availability/install/update/remove boundary; and
 - `SkillsCLIManager`, its actor-backed official-CLI implementation.
 
 Tests use actors, in-memory fakes, and unique temporary directories. They never
@@ -129,21 +140,107 @@ rejected before launch.
 
 The manager launches `Process` directly. The executable URL and argument vector
 remain separate, and no operation uses a shell. Package selection is explicit,
-and each invocation runs in a newly created owner-only empty directory. Exact
-non-interactive forms are:
+and each invocation runs in a newly created owner-only empty working directory.
+The exact non-interactive mutation forms are:
 
 ```text
 npx --yes --package skills@1.5.21 -- skills add <repository> --skill <slug> --global --agent <agent> --copy --yes
 npx --yes --package skills@1.5.21 -- skills remove <slug> --global --agent <agent> --yes
 ```
 
-The official 1.5.21 update parser accepts `--global`, `--project`, `--yes`, and
-positional skill names, but no `--agent`. Its global implementation reads shared
-lock state and reinstalls through `add`, so a successful call cannot prove it
-mutated only the selected source. The app validates the selected source and skill
-then returns `scopedUpdateUnsupported` without launching a process. Reinstalling
-from a reviewed source is the supported refresh path until upstream exposes an
-agent-scoped contract.
+The exact availability probe is:
+
+```text
+npx --yes --package skills@1.5.21 -- skills check --global --yes
+```
+
+The official 1.5.21 implementation routes `check`, `update`, and `upgrade` to the
+same update handler. The handler accepts `--global`, `--project`, `--yes`, and
+positional skill names but no `--agent`; its global path reads shared lock state
+and reinstalls through `add`. It also has no JSON output mode. A successful call
+against the account home therefore cannot prove it only observed state or
+mutated one selected source. The per-skill app action validates its source and
+skill, then returns `scopedUpdateUnsupported` without launching a process.
+Reinstalling from a reviewed source is the supported refresh path until upstream
+exposes an agent-scoped mutation contract.
+
+### Update availability isolation
+
+`SkillsCLIManager.checkForUpdates()` treats the upstream command as a destructive
+probe and shares the manager's FIFO operation gate with install, update, and
+remove. Its only real-home input is `~/.agents/.skill-lock.json`; it never scans
+another agent directory or a project lock. The reader rejects a symlink anywhere
+from the resolved account home through the lock, any non-regular lock, any lock
+greater than 1 MiB, JSON other than schema version 3, and more than 10,000 skill
+entries.
+Each retained entry must have a safe installation directory name, one of the
+reviewed `github`, `gitlab`, or `git` source types, semantically matching HTTPS
+source metadata without credentials, query, or fragment, a safe relative path
+ending in `SKILL.md`, a 40- or 64-character ASCII hexadecimal folder hash, and
+bounded non-control metadata. Entries grouped under one source must agree on
+source type, URL, and ref because upstream uses the group's first entry.
+
+The validated value is decoded into a closed schema and re-encoded with sorted
+keys. Unrecognized root or entry fields are therefore omitted rather than copied
+into the probe. The manager creates a fresh `0700` disposable home, a canonical
+`.agents/.skill-lock.json` at `0600`, and a separate `0700` working directory.
+It creates no stdout file. The normal environment allowlist points `HOME`,
+`CODEX_HOME`, and `TMPDIR` into the disposable home and sets
+`GIT_TERMINAL_PROMPT=0`. No real skill installation path, project lock,
+user/global package-manager configuration, inherited credential, or unrelated
+parent variable reaches the child. The reviewed upstream path directs repository
+downloads and installations under the disposable home and receives no explicit
+real skill path. This is process configuration, not a filesystem sandbox; the
+security document records the remaining ambient-access risk.
+
+The process runner creates an anonymous stdout pipe and gives one detached
+capture task sole ownership of reading and closing its nonblocking read
+descriptor. That task drains directly into bounded memory while the child
+executes and enforces a 256 KiB ceiling; crossing it requests termination and
+fails closed. There is no `update-check.stdout` or other child-visible capture
+artifact. No other task closes the reader, avoiding a descriptor-reuse race.
+Caller cancellation cancels and awaits the capture task. After the direct
+process exits, the runner allows one second for the pipe to reach EOF, then
+cancels and awaits the capture task and fails closed if an inherited descendant
+writer kept it open. Standard input and error remain disconnected.
+
+After a zero exit and successful drain, the runner returns the bounded in-memory
+bytes. The manager requires UTF-8, removes only the exact ANSI sequences present
+in the reviewed transcript, and then accepts in order either:
+
+- one header, every expected lock source exactly once, and the all-current line;
+  or
+- one header, every expected source, positive found and summary counts, and one
+  matching `Updating` and `Updated` pair for every returned lock skill name.
+
+Any unknown terminal control or line, unexpected or duplicate source/name,
+failure/skip/deletion diagnostic, inconsistent count, or partial transcript is
+an error; raw output is neither logged nor presented. The public
+`SkillUpdateAvailability` result carries URL identities, not bare names. For each
+validated lock key produced by the isolated-home probe, the manager constructs
+only the resolved account home's
+`.agents/skills/<validated-name>` file URL. Version 3 records no per-agent
+destination identity, and `skillFolderHash` describes the source's remote tree;
+it does not prove the local contents or provenance of a same-named copy in
+Claude, Cursor, Copilot, Gemini, or a custom folder. The manager returns the
+Global URL set as `checkedSkillDirectoryURLs` and maps the parser's subset
+through the same layout as `updateAvailableSkillDirectoryURLs`; neither lock
+metadata nor transcript text can choose another directory. The model then
+resolves symlinks, standardizes directory semantics, rechecks the subset
+relationship, and intersects those identities with installations actually
+discovered at the same canonical URLs before storing the normalized result. An
+empty validated lock returns both sets empty without launching `npx`; it does not
+assert that installed skills are current.
+Deferred cleanup covers the working directory, canonical lock, and complete
+disposable home after success, launch failure, nonzero exit, timeout,
+cancellation, and parse failure.
+
+Focused real-process regressions exercise successful bounded capture, the actual
+stdout ceiling, pipe-only capture without a working-directory artifact, and
+capture-task cancellation. The cancellation regression waits for a child-created
+readiness marker instead of assuming a fixed delay means the subprocess launched.
+A macOS-only regression covers the requirement that an inherited writer cannot
+hold the drain open beyond the one-second deadline.
 
 Supported mappings are:
 
@@ -165,18 +262,22 @@ readable but lifecycle changes return an actionable unsupported-source error. If
 the account home cannot be resolved, lifecycle operations fail closed before
 resolving `npx` or launching a process.
 
-The child environment is an allowlist: account home, the constructed executable
-path, locale and temporary-directory settings, telemetry opt-outs, and explicit
-npm/Git settings. npm is fixed to `https://registry.npmjs.org/`, lifecycle scripts
-are disabled, online metadata is preferred, and user/global npm and Git
-configuration are ignored. Unrelated variables and secrets are not forwarded.
-Standard input, output, and error use the null device. A nonzero status becomes a
-typed error without exposing unbounded CLI output. The runner has a five-minute
-deadline, propagates task cancellation, sends termination first, and force-kills
-the directly launched `npx` process after a one-second grace period if it is
-still running. The liveness check and `SIGKILL` share one lock scope. Descendants
-are not placed in a supervised process group and may continue after the direct
-process exits; timeout and cancellation errors disclose this limit.
+The child environment is an allowlist: the applicable real or disposable home,
+the constructed executable path, locale and temporary-directory settings,
+telemetry opt-outs, and explicit npm/Git settings. npm is fixed to
+`https://registry.npmjs.org/`, lifecycle scripts are disabled, online metadata
+is preferred, user/global npm and Git configuration are ignored, and
+`GIT_TERMINAL_PROMPT=0` disables interactive credential prompts. Unrelated
+variables and secrets are not forwarded. Install and remove send standard input,
+output, and error to the null device. The isolated availability probe keeps input
+and error disconnected and captures only bounded pipe output as described above. A
+nonzero status becomes a typed error without exposing raw CLI output. The runner
+has a five-minute deadline, propagates task cancellation, sends termination
+first, and force-kills the directly launched `npx` process after a one-second
+grace period if it is still running. The liveness check and `SIGKILL` share one
+lock scope. Descendants are not placed in a supervised process group and may
+continue after the direct process exits; timeout and cancellation errors
+disclose this limit.
 
 Postconditions cannot be satisfied by stale state. Install requires the exact
 destination entry to be absent before launch and snapshots the source's entry
@@ -199,8 +300,62 @@ One selected destination or skill is one outcome. Catalog installation continues
 after a destination failure. Library update and removal likewise continue after
 an individual failure and present a concise combined error.
 
+`AgentSkill.updateStatus` uses the explicit `SkillUpdateStatus` values
+`.unknown`, `.current`, and `.available`. The property remains optional only so
+pre-probe and previously encoded values can use installed/available version
+comparison as a compatibility fallback. A completed or cleared probe assigns
+explicit `.unknown` to unchecked skills; `hasUpdate` then returns false even
+when stale legacy version fields differ. Only `.available` produces an update
+indicator.
+
+After restoration finishes scanning every enabled source,
+`SkillLibraryModel.refreshUpdateAvailability()` marks the check as running,
+but preserves the last trustworthy statuses, update count, and normalized result
+while awaiting `SkillManaging`. It normalizes a successful result's file URLs to
+symlink-resolved, standardized directory identities, requires the update set to
+remain a subset of the checked set, stores the normalized result, and replaces
+all statuses in one reconciled array. A checked URL with exactly one installed
+match becomes `.available` when it is in the update subset and `.current`
+otherwise. Because the production manager returns only Global URLs, same-named
+installations in every other agent or custom path remain `.unknown`; multiple
+model entries for one canonical physical URL are likewise ambiguous and remain
+unknown.
+
+The state becomes current only when every installed skill received one of those
+unique authoritative URL matches; otherwise a successful probe is partial. This
+state carries checked and total counts, preventing an empty or incomplete lock
+from producing “All Skills Are Up to Date.” An empty library returns to idle
+rather than treating zero checked out of zero as current.
+After every successful source rescan, the model reapplies the normalized last
+result across the complete replacement skill list. Existing covered skills keep
+their current/available status, while a newly discovered unchecked skill becomes
+unknown and immediately downgrades current to counted partial. Cancellation
+clears prior positives and returns to idle. A missing global lock quietly becomes
+unavailable, while missing Node.js/`npx` or an absent lifecycle manager quietly
+becomes unsupported; neither opens a modal alert. Malformed input, execution
+failure, timeout, or invalid output clears prior positives, marks availability
+unavailable, and uses the existing safe alert path.
+
+`SkillLibrarySorter` treats `hasUpdate` as an invariant first key. The user's
+name, newest-date, or agent/source selection remains the secondary order inside
+the update and current partitions; relative path and then source ID provide the
+stable final tie breakers. An update row shows the text `Update` with a filled
+and stroked status treatment and includes `Update available` in its combined
+accessibility label, so the state does not depend on color or imply a button.
+Explicit unknown rows display `Not checked`. The persistent toolbar control
+starts a check with Command-R; while checking it presents a spinner and Cancel control without
+hiding prior trustworthy update rows. The Updates Available empty state
+distinguishes idle, checking, counted partial, current, unsupported, and
+unavailable results. Partial copy reports `checked` and `total`, and idle,
+partial, unsupported, and unavailable states offer appropriate retry or Node.js
+guidance. A completion transition posts a VoiceOver announcement containing the
+update count and partial coverage when applicable. Update-driven reordering uses
+a state-scoped animation and disables it when Reduce Motion is enabled.
+
 The production manager currently returns an explicit failure for every update,
-so the model reports the upstream limitation and does not rescan on that path.
+so row, detail, context-menu, and multi-select update surfaces are all inert
+`Reinstall Required` guidance rather than actions. They direct users to reinstall
+from a trusted source, and the model does not launch or rescan on that path.
 Removal immediately drops only successful IDs, then rescans sources that share
 the affected directory. Failed removals stay visible and selected. Views disable
 conflicting actions and show progress while IDs are in `mutatingSkillIDs`.
@@ -273,7 +428,9 @@ The library title reports the selected scope and item count. Toolbar actions kee
 discovery and Settings separate from sort/search controls. Static content uses
 semantic backgrounds; Liquid Glass is reserved for interactive controls. Busy,
 paused, scanning, and unavailable states use accessible text or labels rather
-than color alone.
+than color alone. Update availability likewise uses visible text and remains
+part of the row's explicit accessibility label without implying an update
+action.
 
 ## CI and unsigned DMG distribution
 

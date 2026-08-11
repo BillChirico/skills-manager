@@ -11,6 +11,15 @@ final class SkillLibraryModel {
         case unavailable
     }
 
+    enum UpdateCheckState: Hashable {
+        case idle
+        case checking
+        case partial(checked: Int, total: Int)
+        case current
+        case unsupported
+        case unavailable
+    }
+
     struct PresentedError: Identifiable {
         let id = UUID()
         let title: String
@@ -44,6 +53,11 @@ final class SkillLibraryModel {
         let message: String
     }
 
+    private struct SourceRestoreResult {
+        let sourcesToScan: [SkillSource]
+        let shouldCheckForUpdates: Bool
+    }
+
     private(set) var sources: [SkillSource]
     private(set) var skills: [AgentSkill]
     private(set) var sourceStates: [SkillSource.ID: SourceState]
@@ -59,6 +73,7 @@ final class SkillLibraryModel {
     var sortOrder: SkillSortOrder
     var presentedError: PresentedError?
     private(set) var mutatingSkillIDs: Set<AgentSkill.ID> = []
+    private(set) var updateCheckState: UpdateCheckState = .idle
 
     @ObservationIgnored private let sourceStore: (any SkillSourceStore)?
     @ObservationIgnored private let discoverer: (any SkillDiscovering)?
@@ -72,6 +87,8 @@ final class SkillLibraryModel {
     @ObservationIgnored private var excludedAutomaticDirectoryURLs: Set<URL> = []
     @ObservationIgnored private var sourceMutationIsRunning = false
     @ObservationIgnored private var sourceMutationWaiters: [CheckedContinuation<Void, Never>] = []
+    @ObservationIgnored private var lastUpdateAvailability: SkillUpdateAvailability?
+    @ObservationIgnored private var updateCheckTask: Task<Void, Never>?
 
     init(
         sources: [SkillSource] = [],
@@ -152,6 +169,31 @@ final class SkillLibraryModel {
         }
     }
 
+    var updateCheckCompletionAnnouncement: String {
+        let updateCount = updatesAvailableCount
+        let updateDescription =
+            updateCount == 1
+            ? "1 update available."
+            : "\(updateCount) updates available."
+
+        switch updateCheckState {
+        case .idle:
+            return skills.isEmpty
+                ? "Update check complete. No installed skills to check."
+                : "Update check cancelled."
+        case .checking:
+            return "Checking for updates."
+        case .partial(let checked, let total):
+            return "\(updateDescription) \(checked) of \(total) skills checked."
+        case .current:
+            return updateCount == 0 ? "All checked skills are up to date." : updateDescription
+        case .unsupported:
+            return "Update checking is unavailable. Node.js 22.20 or newer is required."
+        case .unavailable:
+            return "Update status is unavailable."
+        }
+    }
+
     /// The window title, which names what the content column is currently showing.
     var scopeTitle: String {
         switch sidebarSelection {
@@ -221,15 +263,21 @@ final class SkillLibraryModel {
 
     func restoreSources() async {
         // try? handles CancellationError thrown when task is cancelled before execution
-        let sourcesToScan =
-            (try? await withSerializedSourceMutation { () -> [SkillSource] in
+        let restoreResult =
+            (try? await withSerializedSourceMutation { () -> SourceRestoreResult in
                 guard hasRestoredSources == false else {
-                    return []
+                    return SourceRestoreResult(
+                        sourcesToScan: [],
+                        shouldCheckForUpdates: false
+                    )
                 }
                 hasRestoredSources = true
 
                 guard let sourceStore else {
-                    return []
+                    return SourceRestoreResult(
+                        sourcesToScan: [],
+                        shouldCheckForUpdates: true
+                    )
                 }
 
                 do {
@@ -338,14 +386,21 @@ final class SkillLibraryModel {
                         }
                     }
 
-                    return restoredSourcesToScan
+                    return SourceRestoreResult(
+                        sourcesToScan: restoredSourcesToScan,
+                        shouldCheckForUpdates: true
+                    )
                 } catch {
                     report(error, title: "Unable to Restore Directories")
-                    return []
+                    return SourceRestoreResult(
+                        sourcesToScan: [],
+                        shouldCheckForUpdates: true
+                    )
                 }
-            }) ?? []
+            })
+            ?? SourceRestoreResult(sourcesToScan: [], shouldCheckForUpdates: false)
 
-        for source in sourcesToScan {
+        for source in restoreResult.sourcesToScan {
             do {
                 try await rescanSource(source.id)
             } catch {
@@ -354,6 +409,152 @@ final class SkillLibraryModel {
                     title: "Unable to Scan \(source.displayName)"
                 )
             }
+        }
+
+        if restoreResult.shouldCheckForUpdates {
+            await refreshUpdateAvailability()
+        }
+    }
+
+    @discardableResult
+    func startUpdateAvailabilityRefresh() -> Task<Void, Never> {
+        if let updateCheckTask {
+            return updateCheckTask
+        }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performUpdateAvailabilityRefresh()
+        }
+        updateCheckTask = task
+        return task
+    }
+
+    func cancelUpdateAvailabilityRefresh() {
+        updateCheckTask?.cancel()
+    }
+
+    func refreshUpdateAvailability() async {
+        let task = startUpdateAvailabilityRefresh()
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func performUpdateAvailabilityRefresh() async {
+        defer { updateCheckTask = nil }
+
+        guard let skillManager else {
+            clearUpdateAvailability()
+            updateCheckState = .unsupported
+            return
+        }
+
+        updateCheckState = .checking
+
+        do {
+            let result = try await skillManager.checkForUpdates()
+            try Task.checkCancellation()
+            let availability = try normalizedUpdateAvailability(result)
+            lastUpdateAvailability = availability
+            applyUpdateAvailability(availability)
+        } catch is CancellationError {
+            clearUpdateAvailability()
+            updateCheckState = .idle
+        } catch let error as SkillsCLIError where error == .commandCancelled {
+            clearUpdateAvailability()
+            updateCheckState = .idle
+        } catch let error as SkillsCLIError where error == .npxNotFound {
+            clearUpdateAvailability()
+            updateCheckState = .unsupported
+        } catch let error as SkillsCLIError where error == .updateCheckLockMissing {
+            clearUpdateAvailability()
+            updateCheckState = .unavailable
+        } catch {
+            clearUpdateAvailability()
+            updateCheckState = .unavailable
+            report(error, title: "Unable to Check for Updates")
+        }
+    }
+
+    private func clearUpdateAvailability() {
+        lastUpdateAvailability = nil
+        skills = skills.map { skill in
+            var skill = skill
+            skill.updateStatus = .unknown
+            return skill
+        }
+    }
+
+    private func normalizedUpdateAvailability(
+        _ availability: SkillUpdateAvailability
+    ) throws -> SkillUpdateAvailability {
+        guard
+            availability.updateAvailableSkillDirectoryURLs.isSubset(
+                of: availability.checkedSkillDirectoryURLs
+            ),
+            availability.checkedSkillDirectoryURLs.allSatisfy(\.isFileURL)
+        else {
+            throw SkillsCLIError.updateCheckOutputInvalid
+        }
+
+        let checkedURLs = Set(
+            availability.checkedSkillDirectoryURLs.map(canonicalDirectoryURL(for:))
+        )
+        let updateURLs = Set(
+            availability.updateAvailableSkillDirectoryURLs.map(canonicalDirectoryURL(for:))
+        )
+        guard updateURLs.isSubset(of: checkedURLs) else {
+            throw SkillsCLIError.updateCheckOutputInvalid
+        }
+        return SkillUpdateAvailability(
+            checkedSkillDirectoryURLs: checkedURLs,
+            updateAvailableSkillDirectoryURLs: updateURLs
+        )
+    }
+
+    private func applyUpdateAvailability(
+        _ availability: SkillUpdateAvailability,
+        updatesCheckState: Bool = true
+    ) {
+        let indicesByDirectoryURL = Dictionary(grouping: skills.indices) { index in
+            canonicalDirectoryURL(for: skills[index].directoryURL)
+        }
+        var uniquelyCheckedIndices = Set<Int>()
+        var reconciledSkills = skills
+
+        for index in reconciledSkills.indices {
+            reconciledSkills[index].updateStatus = .unknown
+        }
+        for checkedURL in availability.checkedSkillDirectoryURLs {
+            guard
+                let matchingIndices = indicesByDirectoryURL[checkedURL],
+                matchingIndices.count == 1,
+                let index = matchingIndices.first
+            else {
+                continue
+            }
+            reconciledSkills[index].updateStatus =
+                availability.updateAvailableSkillDirectoryURLs.contains(checkedURL)
+                ? .available : .current
+            uniquelyCheckedIndices.insert(index)
+        }
+        skills = reconciledSkills
+
+        guard updatesCheckState else {
+            return
+        }
+        if skills.isEmpty {
+            updateCheckState = .idle
+        } else if uniquelyCheckedIndices.count == skills.count {
+            updateCheckState = .current
+        } else {
+            updateCheckState = .partial(
+                checked: uniquelyCheckedIndices.count,
+                total: skills.count
+            )
         }
     }
 
@@ -580,6 +781,9 @@ final class SkillLibraryModel {
             do {
                 try await persistSources()
                 sourceAccess?.stopAccessing(sourceID: sourceID)
+                if let lastUpdateAvailability {
+                    applyUpdateAvailability(lastUpdateAvailability)
+                }
             } catch {
                 if sources.contains(where: { $0.id == sourceID }) == false {
                     sources.append(removedSource)
@@ -652,12 +856,19 @@ final class SkillLibraryModel {
                 var merged = discoveredSkill
                 merged.isEnabled = existing.isEnabled
                 merged.availableVersion = existing.availableVersion
+                merged.updateStatus = existing.updateStatus
                 return merged
             }
 
             skills.removeAll { $0.sourceID == sourceID }
             skills.append(contentsOf: mergedSkills)
             skills = Self.sortedSkills(skills)
+            if let lastUpdateAvailability {
+                applyUpdateAvailability(
+                    lastUpdateAvailability,
+                    updatesCheckState: updateCheckState != .checking
+                )
+            }
             sourceStates[sourceID] = .available
             reconcileSelection()
         } catch {

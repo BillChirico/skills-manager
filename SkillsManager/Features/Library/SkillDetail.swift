@@ -129,16 +129,12 @@ struct SkillDetail: View {
     private func actionBar(for skill: AgentSkill) -> some View {
         HStack(spacing: SkillsManagerSpacing.small) {
             if skill.hasUpdate {
-                Button(
-                    "Update to \(skill.availableVersion ?? "Latest")",
-                    systemImage: "arrow.down.circle"
-                ) {
-                    Task { @MainActor in
-                        await model.updateSkills([skill.id])
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.isMutating(skill.id))
+                Label("Reinstall Required", systemImage: "arrow.down.circle")
+                    .foregroundStyle(.secondary)
+                    .help(LibraryUpdateGuidance.scopedHelp)
+                    .accessibilityLabel(
+                        "Update available. Reinstall from a trusted source to update."
+                    )
             }
 
             Button(skill.isEnabled ? "Disable" : "Enable") {
@@ -311,17 +307,14 @@ struct SkillDetail: View {
                 .foregroundStyle(.secondary)
 
             HStack(spacing: SkillsManagerSpacing.small) {
-                Button(bulkUpdateTitle, systemImage: "arrow.down.circle") {
-                    let skillIDs = model.selectedSkillIDs
-                    Task { @MainActor in
-                        await model.updateSkills(skillIDs)
-                    }
+                if model.selectedSkills.contains(where: \.hasUpdate) {
+                    Label("Reinstall Required", systemImage: "arrow.down.circle")
+                        .foregroundStyle(.secondary)
+                        .help(LibraryUpdateGuidance.scopedHelp)
+                        .accessibilityLabel(
+                            "Reinstall Required. \(LibraryUpdateGuidance.scopedHelp)"
+                        )
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(
-                    model.selectedSkills.contains(where: \.hasUpdate) == false
-                        || selectedSkillsAreMutating
-                )
 
                 Button(bulkEnablementTitle) {
                     model.setSkillsEnabled(
@@ -352,10 +345,6 @@ struct SkillDetail: View {
             return "\(updateCount) have updates available."
         }
         return "Manage the selected skills together."
-    }
-
-    private var bulkUpdateTitle: String {
-        model.selectedSkills.count == 2 ? "Update Both" : "Update Selected"
     }
 
     private var bulkEnablementTitle: String {

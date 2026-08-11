@@ -1,5 +1,12 @@
 import Foundation
 
+/// The authoritative availability state assigned by a completed CLI probe.
+public enum SkillUpdateStatus: String, Codable, Sendable {
+    case unknown
+    case current
+    case available
+}
+
 public struct AgentSkill: Identifiable, Hashable, Codable, Sendable {
     public let id: SkillIdentifier
     public var name: String
@@ -7,6 +14,9 @@ public struct AgentSkill: Identifiable, Hashable, Codable, Sendable {
     public var author: String?
     public var installedVersion: String?
     public var availableVersion: String?
+    /// `nil` preserves legacy version comparison before a probe; `.unknown`
+    /// explicitly suppresses it when the latest probe did not cover this skill.
+    public var updateStatus: SkillUpdateStatus?
     public var directoryURL: URL
     public var sourceID: SkillSource.ID
     public var isEnabled: Bool
@@ -21,6 +31,7 @@ public struct AgentSkill: Identifiable, Hashable, Codable, Sendable {
         author: String? = nil,
         installedVersion: String? = nil,
         availableVersion: String? = nil,
+        updateStatus: SkillUpdateStatus? = nil,
         directoryURL: URL,
         sourceID: SkillSource.ID,
         relativePath: String? = nil,
@@ -40,6 +51,7 @@ public struct AgentSkill: Identifiable, Hashable, Codable, Sendable {
         self.author = author
         self.installedVersion = installedVersion
         self.availableVersion = availableVersion
+        self.updateStatus = updateStatus
         self.directoryURL = directoryURL
         self.sourceID = sourceID
         self.isEnabled = isEnabled
@@ -61,6 +73,10 @@ public struct AgentSkill: Identifiable, Hashable, Codable, Sendable {
     }
 
     public var hasUpdate: Bool {
+        if let updateStatus {
+            return updateStatus == .available
+        }
+
         guard let installedVersion, let availableVersion else {
             return false
         }
